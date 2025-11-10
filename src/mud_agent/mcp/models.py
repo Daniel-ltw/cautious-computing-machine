@@ -1,0 +1,526 @@
+"""Peewee ORM models for the MUD Agent knowledge graph.
+
+This module defines the database schema for migrating from JSON-based
+knowledge graph to SQLite using Peewee ORM.
+"""
+
+import logging
+import json
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Dict, Any
+
+from peewee import (
+    SqliteDatabase,
+    Model,
+    CharField,
+    TextField,
+    IntegerField,
+    FloatField,
+    BooleanField,
+    DateTimeField,
+    ForeignKeyField,
+    Index,
+    DoesNotExist,
+    SQL,
+    Proxy,
+)
+
+logger = logging.getLogger(__name__)
+
+# Database configuration
+DB_PATH = Path.cwd() / ".mcp" / "knowledge_graph.db"
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# Use a proxy for the database to allow for dynamic initialization
+db = Proxy()
+
+
+class BaseModel(Model):
+    """Base model with common fields and database configuration."""
+
+    created_at = DateTimeField(default=datetime.now)
+    updated_at = DateTimeField(default=datetime.now)
+
+    class Meta:
+        database = db
+
+    def save(self, *args, **kwargs):
+        """Override save to update the updated_at timestamp."""
+        self.updated_at = datetime.now()
+        return super().save(*args, **kwargs)
+
+
+class Entity(BaseModel):
+    """Core entity table for both rooms and NPCs."""
+
+    name = CharField(max_length=200, index=True)
+    entity_type = CharField(max_length=20, index=True)  # 'Room' or 'NPC'
+
+    class Meta:
+        indexes = (
+            # Composite index for type-based queries
+            (('entity_type', 'name'), False),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the entity to a dictionary."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "entity_type": self.entity_type,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+    def __str__(self):
+        return f"{self.entity_type}: {self.name}"
+
+
+class Room(BaseModel):
+    """Room-specific data table."""
+
+    entity = ForeignKeyField(Entity, backref='room_data', unique=True)
+    room_number = IntegerField(unique=True, index=True)
+    terrain = CharField(max_length=50, null=True, index=True)
+    zone = CharField(max_length=100, null=True, index=True)
+    full_name = CharField(max_length=200, null=True)
+    outside = BooleanField(default=False, index=True)
+
+    # Coordinates (if available)
+    coord_x = IntegerField(null=True)
+    coord_y = IntegerField(null=True)
+    coord_z = IntegerField(null=True)
+
+    class Meta:
+        indexes = (
+            # Spatial index for coordinate-based queries
+            (('coord_x', 'coord_y', 'coord_z'), False),
+            # Zone-based queries
+            (('zone', 'terrain'), False),
+        )
+
+    def __str__(self):
+        return f"Room {self.room_number}: {self.entity.name}"
+
+    @classmethod
+    def create_or_update_from_dict(cls, data: Dict[str, Any]) -> Optional["Room"]:
+        """Create or update a room from a dictionary using a more robust method.
+
+        Returns:
+            The Room object if successful, otherwise None.
+        """
+        logger.debug(f"Attempting to create or update room with data: {data}")
+
+        room_number = data.get("room_number") or data.get("num")
+        if not room_number:
+            logger.error("Failed to create or update room: 'num' is missing.")
+            return None
+
+        name = data.get("name")
+        if not name:
+            logger.error("Failed to create or update room: 'name' is missing.")
+            return None
+
+        with db.atomic():
+            # Create or update the associated Entity using the room number as the name
+            entity, _ = Entity.get_or_create(
+                name=str(room_number),
+                defaults={"entity_type": "Room"}
+            )
+
+            # Use get_or_create for a cleaner approach
+            room, created = cls.get_or_create(
+                entity=entity,
+                room_number=int(room_number),
+            )
+
+            # Prepare room data for creation or update
+            room_data = {
+                "terrain": data.get("terrain", room.terrain),
+                "zone": data.get("zone", room.zone or "unknown"),
+                "full_name": data.get("full_name", data.get("name")) or room.full_name,
+                "outside": data.get("outside", False),
+                "coord_x": data.get("coord", {"x": room.coord_x}).get("x"),
+                "coord_y": data.get("coord", {"y": room.coord_y}).get("y"),
+                "coord_z": data.get("coord", {"z": room.coord_z}).get("z", 0),
+            }
+
+            if not created:
+                # The room already existed, so we update it with new data.
+                # We filter out None values to avoid overwriting existing data with nothing.
+                for key, value in room_data.items():
+                    if value is not None:
+                        setattr(room, key, value)
+                room.save()  # This will also update the 'updated_at' timestamp.
+
+            # Handle exits
+            exits = data.get("exits")
+            logger.debug(f"Processing exits for room {room_number}: {exits}")
+            if exits:
+                for direction, exit_info in exits.items():
+                    is_door = isinstance(exit_info, dict)
+                    to_room_num = exit_info.get("num") if is_door else exit_info
+
+                    # Use get_or_create for the exit
+                    exit_instance, created = RoomExit.get_or_create(
+                        from_room=room,
+                        to_room_number=to_room_num,
+                        defaults={
+                            "direction": direction,
+                            "is_door": is_door,
+                            "door_is_closed": exit_info.get("state") == "closed" if is_door else False,
+                        }
+                    )
+
+                    if not created:
+                        # Update existing exit if necessary
+                        if exit_instance.direction != direction:
+                            exit_instance.direction = direction
+                        if exit_instance.is_door != is_door:
+                            exit_instance.is_door = is_door
+                        if is_door and exit_instance.door_is_closed != (exit_info.get("state") == "closed"):
+                            exit_instance.door_is_closed = exit_info.get("state") == "closed"
+                        exit_instance.save()
+
+                    # Link to_room if the target room exists
+                    if to_room_num is not None:
+                        try:
+                            target_room = Room.select().where(Room.room_number == int(to_room_num)).get()
+                            if exit_instance.to_room != target_room:
+                                exit_instance.to_room = target_room
+                                exit_instance.save()
+                        except DoesNotExist:
+                            # Target room not yet created; will remain NULL until known
+                            pass
+
+            return room
+
+    def to_info(self):
+        exits = {exit.direction.lower(): exit.to_room_number for exit in self.exits}
+        npcs = [npc.entity.name for npc in self.npcs]
+        return {
+            "num": self.room_number,
+            "name": self.full_name or self.entity.name,
+            "area": self.zone,
+            "terrain": self.terrain,
+            "symbol": "●",
+            "exits": exits,
+            "npcs": npcs,
+        }
+
+
+class RoomExit(BaseModel):
+    """Normalized room exit data."""
+
+    from_room = ForeignKeyField(Room, backref='exits')
+    direction = CharField(max_length=20, index=True)  # n, s, e, w, u, d
+    to_room_number = IntegerField(index=True, null=True)
+    is_door = BooleanField(default=False)
+    door_is_closed = BooleanField(default=False)
+    to_room = ForeignKeyField(Room, backref='entrances', null=True)  # May be null if target room not loaded
+
+    # Exit details (door status, etc.)
+    details = TextField(null=True)  # JSON string for additional exit info
+
+    class Meta:
+        indexes = (
+            # Unique constraint on from_room + to_room_number
+            (('from_room', 'to_room_number'), True),
+            # Index for outwards lookups
+            (('from_room', 'direction'), False),
+            # Index for reverse lookups
+            (('to_room_number', 'direction'), False),
+        )
+
+    def __str__(self):
+        return f"Room {self.from_room.room_number} -> {self.direction} -> {self.to_room_number}"
+
+    # --- Exit command memory helpers ---
+    def get_command_details(self) -> Dict[str, Any]:
+        """Return parsed JSON details for exit command sequence.
+
+        Keys:
+        - move_command: str or None
+        - pre_commands: list[str]
+        - last_success_at: float (epoch seconds) or None
+        - source: str (e.g., 'observed')
+        """
+        try:
+            data = json.loads(self.details) if self.details else {}
+            if not isinstance(data, dict):
+                # If malformed, start fresh
+                data = {}
+
+            # Ensure all keys are present with sensible defaults
+            return {
+                "move_command": data.get("move_command"),
+                "pre_commands": data.get("pre_commands") or [],
+                "last_success_at": data.get("last_success_at"),
+                "source": data.get("source"),
+            }
+        except (json.JSONDecodeError, TypeError):
+            # If malformed or not a string, start fresh
+            return {
+                "move_command": None,
+                "pre_commands": [],
+                "last_success_at": None,
+                "source": None,
+            }
+
+    def record_exit_success(
+        self,
+        move_command: Optional[str],
+        pre_commands: Optional[List[str]] = None,
+        source: str = "observed",
+    ) -> None:
+        """Record a successful traversal for this exit.
+
+        Updates JSON details with the provided command sequence and timestamp.
+        """
+        details_dict = self.get_command_details()
+
+        if details_dict["move_command"] == move_command and details_dict["last_success_at"] is not None:
+            return
+
+        if self.direction != move_command:
+            # There must be something wrong with the tracking of the move command
+            # Probably some race condition issue
+            return
+
+        details_dict["move_command"] = move_command
+        details_dict["pre_commands"] = pre_commands
+        details_dict["last_success_at"] = datetime.utcnow().isoformat()
+        details_dict["source"] = source
+
+        self.details = json.dumps(details_dict)
+        logger.info(f"Saving details for exit {self.id}: {self.details}")
+        self.save()
+
+
+class NPC(BaseModel):
+    """NPC-specific data table."""
+
+    entity = ForeignKeyField(Entity, backref='npc_data')
+    current_room = ForeignKeyField(Room, backref='npcs', null=True)
+
+    # NPC classification
+    npc_type = CharField(max_length=50, null=True, index=True)  # Questor, Shopkeeper, etc.
+
+    # Additional NPC metadata can be added here as needed
+
+    class Meta:
+        indexes = (
+            # Room-based NPC queries
+            (('current_room', 'npc_type'), False),
+        )
+        constraints = [SQL('UNIQUE(entity, current_room)')]
+
+    def __str__(self):
+        room_info = f" in room {self.current_room.room_number}" if self.current_room else ""
+        return f"NPC: {self.entity.name}{room_info}"
+
+    @classmethod
+    def create_or_update_from_dict(cls, data: Dict[str, Any], current_room: Optional["Room"] = None) -> "NPC":
+        """Create or update an NPC from a dictionary."""
+        npc_name = data.get("name")
+        if not npc_name:
+            raise ValueError("name is required for NPC")
+
+        with db.atomic():
+            # Create or update the associated Entity
+            entity, _ = Entity.get_or_create(
+                name=npc_name,
+                defaults={"entity_type": "NPC"}
+            )
+
+            npc_data = {
+                "npc_type": data.get("npc_type", "unknown"),
+            }
+
+            # Try to get the NPC, if it exists, update it. Otherwise, create it.
+            npc, created = cls.get_or_create(
+                entity=entity,
+                current_room=current_room,
+                defaults=npc_data
+            )
+
+            return npc
+
+
+class Observation(BaseModel):
+    """Flexible observation storage for both rooms and NPCs."""
+
+    entity = ForeignKeyField(Entity, backref='observations')
+    observation_text = TextField()
+    observation_type = CharField(max_length=50, default='general', index=True)
+
+    class Meta:
+        indexes = (
+            # Entity-based observation queries
+            (('entity', 'created_at'), False),
+            # Type-based queries
+            (('observation_type', 'created_at'), False),
+        )
+
+    def __str__(self):
+        return f"Observation for {self.entity.name}: {self.observation_text[:50]}..."
+
+
+class Relation(BaseModel):
+    """Generic relationship storage between entities."""
+
+    from_entity = ForeignKeyField(Entity, backref='outgoing_relations')
+    to_entity = ForeignKeyField(Entity, backref='incoming_relations')
+    relation_type = CharField(max_length=100, index=True)
+
+    # Additional relation metadata
+    metadata = TextField(null=True)  # JSON string for additional relation info
+
+    class Meta:
+        indexes = (
+            # Unique constraint on from_entity + to_entity + relation_type
+            (('from_entity', 'to_entity', 'relation_type'), True),
+            # Reverse lookup index
+            (('to_entity', 'relation_type'), False),
+            # Type-based queries
+            (('relation_type', 'created_at'), False),
+        )
+
+    def __str__(self):
+        return f"{self.from_entity.name} --{self.relation_type}--> {self.to_entity.name}"
+
+
+# Model registry for easy access
+ALL_MODELS = [Entity, Room, RoomExit, NPC, Observation, Relation]
+
+def get_db_stats() -> Dict[str, int]:
+    """Get statistics about the database."""
+    stats = {}
+    for model in ALL_MODELS:
+        stats[model.__name__] = model.select().count()
+    return stats
+
+
+def get_database_stats() -> Dict[str, int]:
+    """Get statistics about the current database."""
+    stats = {}
+    try:
+        db.connect()
+        for model in ALL_MODELS:
+            stats[model.__name__] = model.select().count()
+        return stats
+    except Exception as e:
+        logger.error(f"Failed to get database stats: {e}", exc_info=True)
+        return {}
+    finally:
+        if not db.is_closed():
+            db.close()
+
+
+def close_database():
+    """Close the database connection."""
+    if not db.is_closed():
+        db.close()
+        logger.debug("Database connection closed")
+
+
+# Context manager for database operations
+class DatabaseContext:
+    """Context manager for database operations."""
+
+    def __enter__(self):
+        if db.is_closed():
+            db.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not db.is_closed():
+            db.close()
+
+
+# Utility functions for common queries
+def get_room_by_number(room_number: int) -> Optional[Room]:
+    """Get a room by its room number."""
+    try:
+        with DatabaseContext():
+            return Room.select().join(Entity).where(Room.room_number == room_number).get()
+    except DoesNotExist:
+        return None
+    except Exception as e:
+        logger.error(f"Error getting room {room_number}: {e}", exc_info=True)
+        return None
+
+
+def get_entity_by_name(name: str, entity_type: str = None) -> Optional[Entity]:
+    """Get an entity by name and optionally by type."""
+    try:
+        with DatabaseContext():
+            query = Entity.select().where(Entity.name == name)
+            if entity_type:
+                query = query.where(Entity.entity_type == entity_type)
+            return query.get()
+    except DoesNotExist:
+        return None
+    except Exception as e:
+        logger.error(f"Error getting entity {name}: {e}", exc_info=True)
+        return None
+
+
+def get_room_exits(room_number: int) -> List[RoomExit]:
+    """Get all exits for a room."""
+    try:
+        with DatabaseContext():
+            room = get_room_by_number(room_number)
+            if not room:
+                return []
+            return list(room.exits)
+    except Exception as e:
+        logger.error(f"Error getting exits for room {room_number}: {e}", exc_info=True)
+        return []
+
+
+def find_path_between_rooms(from_room: int, to_room: int, max_depth: int = 20) -> List[str]:
+    """Find a path between two rooms using BFS.
+
+    Args:
+        from_room: The room number of the starting room.
+        to_room: The room number of the destination room.
+        max_depth: The maximum depth to search.
+
+    Returns:
+        A list of directions to take from from_room to reach to_room.
+    """
+    try:
+        with DatabaseContext():
+            # Simple BFS implementation
+            from collections import deque
+
+            queue = deque([(from_room, [])])
+            visited = {from_room}
+
+            while queue and len(queue[0][1]) < max_depth:
+                current_room, path = queue.popleft()
+
+                if current_room == to_room:
+                    return path
+
+                # Get exits from current room
+                exits = RoomExit.select().join(Room, on=(RoomExit.from_room == Room.id)).where(Room.room_number == current_room)
+
+                for exit in exits:
+                    next_room = exit.to_room_number
+                    if next_room is not None and next_room not in visited:
+                        visited.add(next_room)
+                        new_path = path[:]
+                        command_details = exit.get_command_details()
+                        if len(command_details.get("pre_commands")) > 0:
+                            new_path.extend(command_details["pre_commands"])
+                        new_path.append(exit.direction)
+                        queue.append((next_room, new_path))
+
+            return []  # No path found
+    except Exception as e:
+        logger.error(f"Error finding path from {from_room} to {to_room}: {e}", exc_info=True)
+        return []

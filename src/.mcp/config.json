@@ -1,0 +1,16 @@
+{
+  "Knowledge Graph Memory Server": {
+    "command": "npx",
+    "args": [
+      "@modelcontextprotocol/server-memory"
+    ],
+    "env": {}
+  },
+  "Sequential Thinking MCP Server": {
+    "command": "npx",
+    "args": [
+      "@modelcontextprotocol/server-sequential-thinking"
+    ],
+    "env": {}
+  }
+}

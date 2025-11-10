@@ -1,0 +1,95 @@
+[project]
+name = "mud_agent"
+version = "0.1.0"
+description = "A MUD agent project with telnet and knowledge graph capabilities"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "smolagents[litellm,mcp]~=1.14.0",
+    "telnetlib3>=1.0.4",
+    "python-dotenv>=0.19.0",
+    "colorama>=0.4.6",
+    "asyncio>=3.4.3",
+    "textual",
+    "aiofiles>=23.2.1",
+    "peewee"
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.3.4",
+    "mypy==1.8.0",
+]
+test = [
+    "pytest==7.4.4",
+    "pytest-cov==4.1.0",
+    "pytest-asyncio>=0.21.1",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+fix = true
+unsafe-fixes = false
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "UP",    # pyupgrade
+    "N",     # pep8-naming
+    "SIM",   # flake8-simplify
+    "TCH",   # flake8-type-checking
+    "TID",   # flake8-tidy-imports
+    "RUF",   # ruff-specific rules
+    "PL",    # pylint
+    "PTH",   # use pathlib
+    "ERA",   # eradicate commented-out code
+    "PD",    # pandas-vet
+    "NPY",   # NumPy-specific rules
+    "AIR",   # Airflow
+    "ASYNC", # async/await rules
+]
+
+# Never enforce `E501` (line length violations)
+ignore = ["E501"]
+
+# Ignore `E402` (import violations) in all `__init__.py` files
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mud_agent"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+addopts = "-ra -q --cov=mud_agent"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

@@ -1,0 +1,124 @@
+/* 
+ * CSS for vitals widgets
+ */
+
+/* Base styles for all vital static widgets */
+BaseVitalStaticWidget {
+    width: 1fr;
+    height: 1;
+    padding: 0 1;
+    margin: 0 1;
+    border: none;
+    background: transparent;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Specific styles for HP widget */
+HPStaticWidget {
+    width: 1fr;
+    height: 1;
+    padding: 0 1;
+    margin: 0 1;
+    border: none;
+    background: transparent;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Specific styles for MP widget */
+MPStaticWidget {
+    width: 1fr;
+    height: 1;
+    padding: 0 1;
+    margin: 0 1;
+    border: none;
+    background: transparent;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Specific styles for MV widget */
+MVStaticWidget {
+    width: 1fr;
+    height: 1;
+    padding: 0 1;
+    margin: 0 1;
+    border: none;
+    background: transparent;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Static widget styles */
+Static {
+    width: 100%;
+    height: 1;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    text-align: center;
+    content-align: center middle;
+}
+
+/* Vitals container styling */
+#vitals-container {
+    width: 100%;
+    height: 3;
+    min-height: 3;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Individual vital widget IDs */
+#hp-widget, #mp-widget, #mv-widget {
+    width: 1fr;
+    height: 1;
+    padding: 0 1;
+    margin: 0 1;
+    border: none;
+    background: transparent;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Stats container styling */
+#stats-container {
+    width: 100%;
+    height: 3;
+    min-height: 3;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Individual stat widget IDs */
+#str-widget, #int-widget, #wis-widget, #dex-widget, #con-widget, #luck-widget, #hr-widget, #dr-widget {
+    width: 1fr;
+    height: 1;
+    padding: 0 1;
+    margin: 0 1;
+    border: none;
+    background: transparent;
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
