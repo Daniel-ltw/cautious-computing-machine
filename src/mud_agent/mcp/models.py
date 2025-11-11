@@ -24,7 +24,6 @@ from peewee import (
     Index,
     DoesNotExist,
     SQL,
-    Proxy,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,8 +32,8 @@ logger = logging.getLogger(__name__)
 DB_PATH = Path.cwd() / ".mcp" / "knowledge_graph.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# Use a proxy for the database to allow for dynamic initialization
-db = Proxy()
+# Initialize database
+db = SqliteDatabase(str(DB_PATH))
 
 
 class BaseModel(Model):
@@ -401,6 +400,23 @@ def get_db_stats() -> Dict[str, int]:
     for model in ALL_MODELS:
         stats[model.__name__] = model.select().count()
     return stats
+
+
+
+
+def initialize_database():
+    """Initialize the database and create all tables."""
+    try:
+        db.connect()
+        db.create_tables(ALL_MODELS, safe=True)
+        logger.info(f"Database initialized at {DB_PATH}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}", exc_info=True)
+        return False
+    finally:
+        if not db.is_closed():
+            db.close()
 
 
 def get_database_stats() -> Dict[str, int]:

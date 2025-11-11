@@ -5,14 +5,11 @@ Database migration system for the MUD Agent knowledge graph.
 This module provides a simple migration system to manage schema changes
 for the SQLite database using Peewee ORM models.
 """
-import sys
 
 import os
 import sqlite3
 from typing import List, Callable
 from pathlib import Path
-
-from peewee import SqliteDatabase
 
 from .models import (
     db,
@@ -51,7 +48,8 @@ class Migration:
 class MigrationManager:
     """Manages database migrations."""
     
-    def __init__(self):
+    def __init__(self, db_path: str):
+        self.db_path = db_path
         self.migrations: List[Migration] = []
         self._register_migrations()
     
@@ -116,13 +114,19 @@ class MigrationManager:
     def _get_schema_version(self) -> int:
         """Get the current schema version from the database."""
         try:
-            return db.execute_sql("PRAGMA user_version").fetchone()[0]
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA user_version")
+                return cursor.fetchone()[0]
         except Exception:
             return 0
     
     def _set_schema_version(self, version: int):
         """Set the schema version in the database."""
-        db.execute_sql(f"PRAGMA user_version = {version}")
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"PRAGMA user_version = {version}")
+            conn.commit()
     
     def _migration_001_up(self):
         """Migration 001: Create initial schema."""
@@ -383,30 +387,33 @@ class MigrationManager:
             print(f"  {migration.version:03d}: {migration.description} [{status}]")
 
 
-def init_database(db_path: str = None):
-    """Initialize the database and run all pending migrations."""
-    if db_path is None:
-        db_path = models.DB_PATH
-
-    # Ensure the directory exists for file-based databases
-    if db_path != ":memory:":
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-
-    database = SqliteDatabase(db_path, pragmas={
-        'journal_mode': 'wal',
-        'cache_size': -1024 * 64,  # 64MB
-        'foreign_keys': 1,
-        'ignore_check_constraints': 0,
-        'synchronous': 0
-    })
-    db.initialize(database)
-
-    # Run all migrations
-    manager = MigrationManager()
+def init_database(db_path: str = None) -> MigrationManager:
+    """Initialize the database with all required tables and indexes.
+    
+    Args:
+        db_path: Path to the SQLite database file. If None, uses the default from models.
+    
+    Returns:
+        MigrationManager instance for further operations.
+    """
+    if db_path:
+        # Update the database path in models
+        from . import models
+        models.db.init(db_path)
+    
+    # Ensure the directory exists
+    db_file_path = Path(db.database)
+    db_file_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Create migration manager and run migrations
+    manager = MigrationManager(str(db_file_path))
     manager.migrate()
+    
+    return manager
 
 
-if __name__ == "__main__":
+def main():
+    """Command-line interface for migrations."""
     import argparse
     
     parser = argparse.ArgumentParser(description="Database migration tool")
@@ -432,8 +439,8 @@ if __name__ == "__main__":
     
     if not args.command:
         parser.print_help()
-        sys.exit(0)
-
+        return
+    
     # Determine database path
     if args.db_path:
         db_path = args.db_path
@@ -442,7 +449,7 @@ if __name__ == "__main__":
         from . import models
         db_path = models.db.database
     
-    manager = MigrationManager()
+    manager = MigrationManager(db_path)
     
     if args.command == "migrate":
         manager.migrate(args.version)

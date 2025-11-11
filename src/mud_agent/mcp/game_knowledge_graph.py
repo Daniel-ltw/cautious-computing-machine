@@ -319,13 +319,52 @@ class GameKnowledgeGraph:
                     )
                     to_room = Room.create(entity=to_room_entity, room_number=to_room_num)
 
-                exit_obj = self.get_or_create_exit(
-                    from_room,
-                    direction,
-                    to_room=to_room,
-                    to_room_number=to_room_num
-                )
+                # Normalize the direction to match stored exit keys
+                dir_in = (direction or "").strip().lower()
+                # Handle command-based exits and synonyms
+                mapping = {
+                    "north": "n", "south": "s", "east": "e", "west": "w", "up": "u", "down": "d",
+                    "n": "n", "s": "s", "e": "e", "w": "w", "u": "u", "d": "d",
+                    "enter": "enter", "board": "board", "escape": "escape",
+                }
+                # Reduce phrase commands like 'enter gate' to 'enter'
+                if dir_in.startswith("say "):
+                    dir_key = "say"
+                elif dir_in.startswith("enter "):
+                    dir_key = "enter"
+                elif dir_in.startswith("board"):
+                    dir_key = "board"
+                elif dir_in.startswith("escape"):
+                    dir_key = "escape"
+                else:
+                    dir_key = mapping.get(dir_in, dir_in)
 
+                # Find the matching exit robustly, comparing normalized forms
+                exit_obj = None
+                for ex in from_room.exits:
+                    stored = (ex.direction or "").strip().lower()
+                    if stored.startswith("enter "):
+                        stored_norm = "enter"
+                    elif stored.startswith("board"):
+                        stored_norm = "board"
+                    elif stored.startswith("escape"):
+                        stored_norm = "escape"
+                    else:
+                        stored_norm = mapping.get(stored, stored)
+                    if stored_norm == dir_key:
+                        exit_obj = ex
+                        break
+
+                self.logger.debug(
+                    f"Recording exit success: {from_room_num} -> {to_room_num} ({direction} -> {dir_key})"
+                    f" with move command '{move_cmd}'"
+                    f" pre-commands: {pre_cmds}"
+                )
+                if exit_obj is None:
+                    exit_obj = self.get_or_create_exit(from_room, dir_in, to_room_number=to_room_num)
+
+                exit_obj.to_room = to_room
+                exit_obj.to_room_number = to_room_num
                 exit_obj.record_exit_success(
                     move_command=move_cmd, pre_commands=pre_cmds or []
                 )
@@ -342,7 +381,19 @@ class GameKnowledgeGraph:
             to_room_number = to_room.room_number
 
         if not to_room_number:
-            raise ValueError("to_room_number must be provided to get_or_create_exit")
+            # Fallback to old method if to_room_number is not available
+            try:
+                exit_obj = from_room.exits.where(RoomExit.direction == direction).get()
+                if to_room:
+                    exit_obj.to_room = to_room
+                exit_obj.save()
+                return exit_obj
+            except DoesNotExist:
+                return RoomExit.create(
+                    from_room=from_room,
+                    direction=direction,
+                    to_room=to_room,
+                )
 
         # New method using get_or_create
         exit_obj, created = RoomExit.get_or_create(
@@ -358,8 +409,6 @@ class GameKnowledgeGraph:
             if direction and exit_obj.direction != direction:
                 exit_obj.direction = direction
             exit_obj.save()
-
-        return exit_obj
 
         return exit_obj
 

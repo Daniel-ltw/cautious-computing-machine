@@ -41,9 +41,6 @@ class RoomManager:
 
     async def _handle_command_sent(self, command: str) -> None:
         """Handle the command_sent event."""
-        if ";" in command:
-            self.logger.debug(f"Ignoring chained command for movement tracking: {command}")
-            return
         # TODO: Make this more robust, using a list of aliases for movement commands
         cmd_lower = command.lower()
         movement_commands = [
