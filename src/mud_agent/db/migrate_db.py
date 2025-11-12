@@ -10,30 +10,32 @@ import os
 from pathlib import Path
 
 # Add the project root to the Python path
-project_root = Path(__file__).parent.parent.parent.parent
+project_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(project_root))
 
-from src.mud_agent.mcp.migrations import init_database, MigrationManager
+from mud_agent.mcp.migrations import init_database, MigrationManager
 
 
-def run_migrations(db_path: str | None = None) -> None:
-    """Runs the database migrations.
+class DatabaseMigrator:
 
-    Args:
-        db_path: The path to the database file.
-    """
-    print("Running database migrations...")
-    if db_path is None:
-        project_root = Path(__file__).parent.parent.parent.parent
-        db_path = project_root / ".mcp" / "knowledge_graph.db"
-    else:
-        db_path = Path(db_path)
+    def run_migrations(db_path: str | None = None) -> None:
+        """Runs the database migrations.
 
-    if db_path.exists():
-        manager = MigrationManager(str(db_path))
-        manager.migrate()
-    else:
-        init_database(str(db_path))
+        Args:
+            db_path: The path to the database file.
+        """
+        print("Running database migrations...")
+        if db_path is None:
+            project_root = Path(__file__).parent.parent.parent.parent
+            db_path = project_root / ".mcp" / "knowledge_graph.db"
+        else:
+            db_path = Path(db_path)
+
+        if db_path.exists():
+            manager = MigrationManager(str(db_path))
+            manager.migrate()
+        else:
+            init_database(str(db_path))
 
 def main():
     """Main entry point for database migration."""

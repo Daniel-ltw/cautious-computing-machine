@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional
 
 from peewee import DoesNotExist, fn
 
-from ..db.migrate_db import run_migrations
-from .models import (
+from ..db.migrate_db import DatabaseMigrator
+from ..db.models import (
     NPC,
     Entity,
     Relation,
@@ -47,7 +47,7 @@ class GameKnowledgeGraph:
                 db.connect()
                 self.logger.info("Database connection opened.")
 
-            run_migrations()
+            DatabaseMigrator.run_migrations()
             self._initialized = True
             self.logger.info("Game knowledge graph initialized successfully.")
         except Exception as e:

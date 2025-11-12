@@ -10,7 +10,7 @@ import re
 import time
 import json
 from typing import Dict, List, Optional, Set
-from ..mcp.models import RoomExit, Room
+from ..db.models import RoomExit, Room
 
 
 
@@ -43,6 +43,12 @@ class RoomManager:
         """Handle the command_sent event."""
         # TODO: Make this more robust, using a list of aliases for movement commands
         cmd_lower = command.lower()
+
+        if ";" in cmd_lower:
+            self.pending_exit_command = None
+            self.pending_pre_commands.clear()
+            return
+
         movement_commands = [
             "n", "s", "e", "w", "u", "d",
             "north", "south", "east", "west", "up", "down",

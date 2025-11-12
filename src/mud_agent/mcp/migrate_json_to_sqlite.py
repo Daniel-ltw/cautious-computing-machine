@@ -17,12 +17,21 @@ from typing import Dict, List, Any, Optional
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.mud_agent.mcp.models import (
-    db, Entity, Room, RoomExit, NPC, Observation, Relation,
-    get_entity_by_name, DatabaseContext
+from mud_agent.mcp.models import (
+    db,  # Import the db instance
+    Entity,
+    Room,
+    RoomExit,
+    NPC,
+    Observation,
+    Relation,
 )
-from src.mud_agent.mcp.migrations import init_database
+from mud_agent.mcp.migrations import init_database
+from mud_agent.db.models import (
+    db, Entity, Room, RoomExit, NPC, Observation, Relation
+)
 
+# Define the path to the JSON file and the SQLite database
 
 class JSONToSQLiteMigrator:
     """Handles migration from JSON knowledge graph to SQLite database."""

@@ -11,7 +11,7 @@ import sqlite3
 from typing import List, Callable
 from pathlib import Path
 
-from .models import (
+from ..db.models import (
     db,
     Entity,
     Room,

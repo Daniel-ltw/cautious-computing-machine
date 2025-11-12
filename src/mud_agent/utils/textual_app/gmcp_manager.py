@@ -10,8 +10,8 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Dict, Any, Optional
 
-from src.mud_agent.mcp.models import Room
-
+from ...mcp.game_knowledge_graph import GameKnowledgeGraph
+from ...db.models import Room, RoomExit, NPC, db
 
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,16 @@ class GMCPManager:
 
     async def stop_gmcp_polling(self) -> None:
         """Stop the GMCP polling worker."""
+        if self._gmcp_polling_task and not self._gmcp_polling_task.done():
+            self._gmcp_polling_task.cancel()
+            try:
+                await self._gmcp_polling_task
+            except asyncio.CancelledError:
+                pass  # Expected on cancellation
+
+        self._gmcp_polling_task = None
         self._gmcp_polling_enabled = False
+        return None
 
         if self._gmcp_polling_task and not self._gmcp_polling_task.done():
             self._gmcp_polling_task.cancel()
@@ -121,6 +130,7 @@ class GMCPManager:
             except asyncio.CancelledError:
                 pass
 
+        self._gmcp_polling_task = None
         logger.info("Stopped GMCP polling worker")
 
     async def _gmcp_polling_worker(self) -> None:

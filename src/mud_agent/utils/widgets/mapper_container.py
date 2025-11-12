@@ -9,10 +9,15 @@ from textual.widgets import TabbedContent, TabPane
 from textual.reactive import reactive
 
 from ..room_entity_extractor import extract_rooms_from_db
-from ...mcp.models import Room
 
 from .room_map_widget import RoomMapWidget
 from .state_listener import StateListener
+
+from textual.widget import Widget
+from textual.widgets import Static
+
+from ...db.models import Room
+
 
 class MapperContainer(StateListener, Container):
     """Container for arranging RoomMapWidget instances in a grid, centering the current room."""

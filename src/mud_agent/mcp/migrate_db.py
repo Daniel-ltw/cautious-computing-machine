@@ -10,13 +10,13 @@ import os
 from pathlib import Path
 
 # Add the project root to the Python path
-project_root = Path(__file__).parent.parent.parent.parent
+project_root = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(project_root))
 
-from src.mud_agent.mcp.migrations import init_database, MigrationManager
+from mud_agent.mcp.migrations import init_database, MigrationManager
 
 
-def main():
+class DatabaseMigrator:
     """Main entry point for database migration."""
     print("MUD Agent Knowledge Graph Database Migration")
     print("=" * 50)

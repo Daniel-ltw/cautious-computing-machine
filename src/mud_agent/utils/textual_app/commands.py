@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 
 from ...mcp.game_knowledge_graph import PathfindingError
-from ...mcp.models import db, RoomExit
+from ...db.models import db, RoomExit
 from ..widgets.command_log import CommandLog
 from ..textual_widgets import CommandInput
 

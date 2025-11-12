@@ -1,7 +1,9 @@
 import logging
-from src.mud_agent.mcp.models import Room, RoomExit, NPC, db
+from peewee import fn
+from mud_agent.db.models import Room, RoomExit, NPC, db
+from mud_agent.utils.retrievers import get_retriever
 
-def extract_rooms_from_db() -> list[dict]:
+def extract_rooms_from_db(limit: int = 10) -> list[Room]:
     """
     Extracts room entities from the SQLite database and transforms them into the format expected by MapperContainer.
 
