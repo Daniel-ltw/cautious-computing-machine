@@ -380,37 +380,32 @@ class GameKnowledgeGraph:
         if to_room and not to_room_number:
             to_room_number = to_room.room_number
 
-        if not to_room_number:
-            # Fallback to old method if to_room_number is not available
-            try:
-                exit_obj = from_room.exits.where(RoomExit.direction == direction).get()
+        try:
+            # Try to find an exit by its direction from the source room
+            exit_obj = from_room.exits.where(RoomExit.direction == direction).get()
+
+            # Exit exists, so update it if the destination has changed
+            if to_room_number is not None and exit_obj.to_room_number != to_room_number:
+                exit_obj.to_room_number = to_room_number
                 if to_room:
                     exit_obj.to_room = to_room
                 exit_obj.save()
-                return exit_obj
-            except DoesNotExist:
-                return RoomExit.create(
-                    from_room=from_room,
-                    direction=direction,
-                    to_room=to_room,
-                )
-
-        # New method using get_or_create
-        exit_obj, created = RoomExit.get_or_create(
-            from_room=from_room,
-            to_room_number=to_room_number,
-            defaults={'direction': direction, 'to_room': to_room}
-        )
-
-        if not created:
-            # Update existing exit if needed
-            if to_room and exit_obj.to_room != to_room:
+            elif to_room and exit_obj.to_room != to_room:
                 exit_obj.to_room = to_room
-            if direction and exit_obj.direction != direction:
-                exit_obj.direction = direction
-            exit_obj.save()
+                if to_room.room_number:
+                    exit_obj.to_room_number = to_room.room_number
+                exit_obj.save()
 
-        return exit_obj
+            return exit_obj
+
+        except DoesNotExist:
+            # Exit does not exist, so create a new one
+            return RoomExit.create(
+                from_room=from_room,
+                direction=direction,
+                to_room=to_room,
+                to_room_number=to_room_number,
+            )
 
     async def find_path_between_rooms(
         self, start_room_id: int, end_room_identifier: [int, str], max_depth: int = 350

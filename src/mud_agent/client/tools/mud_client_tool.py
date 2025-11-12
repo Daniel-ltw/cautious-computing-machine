@@ -84,15 +84,7 @@ class MUDClientTool(Tool):
             return False
 
     async def forward(self, command: str, is_user_command: bool = False) -> str:
-        """Send a command to the MUD server.
-
-        Args:
-            command: The command to send. Can contain multiple commands separated by semicolons.
-            is_user_command: Whether this command was initiated by the user (high priority)
-
-        Returns:
-            str: The response from the MUD server
-        """
+        """Forwards a command to the MUD server, handling multiple commands separated by semicolons."""
         try:
             # Check if the command contains semicolons (multiple commands)
             if ";" in command:
@@ -108,6 +100,9 @@ class MUDClientTool(Tool):
                         cmd, is_user_command
                     )
 
+                    # Update room info after each command
+                    self._update_room_info(cmd_response)
+
                     # Add a separator between command responses for clarity
                     if combined_response:
                         combined_response += f"\n\n--- COMMAND: {cmd} ---\n\n"
@@ -120,7 +115,9 @@ class MUDClientTool(Tool):
                 return combined_response
             else:
                 # Process a single command with priority flag
-                return await self._forward_single_command(command, is_user_command)
+                response = await self._forward_single_command(command, is_user_command)
+                self._update_room_info(response)
+                return response
         except Exception as e:
             logger.error(f"Error processing commands: {e}", exc_info=True)
             return f"Error: {e!s}"
@@ -387,7 +384,7 @@ class MUDClientTool(Tool):
         full_text_entries = []
         for entry in debug_entries:
             if entry.startswith("DEBUG FULL TEXT:"):
-                text = entry[len("DEBUG FULL TEXT:") :].strip()
+                text = entry[len("DEBUG FULL TEXT:"):].strip()
                 if text and len(text) > MIN_TEXT_LENGTH:
                     full_text_entries.append(text)
 
@@ -398,7 +395,7 @@ class MUDClientTool(Tool):
 
         return ""
 
-    def _extract_text_entries(self, debug_entries: list) -> str:
+    def _extract_text_entries(selfself, debug_entries: list) -> str:
         """Extract TEXT entries from debug capture.
 
         Args:
@@ -410,7 +407,7 @@ class MUDClientTool(Tool):
         text_entries = []
         for entry in debug_entries:
             if entry.startswith("DEBUG TEXT:"):
-                text = entry[len("DEBUG TEXT:") :].strip()
+                text = entry[len("DEBUG TEXT:"):].strip()
                 if text and len(text) > MIN_TEXT_LENGTH:
                     text_entries.append(text)
 
@@ -453,6 +450,6 @@ class MUDClientTool(Tool):
         self.last_room_description = response
 
         # Try to extract exits from the response
-        exits_match = re.search(r"\[\s*Exits:\s*([^\]]+)\]", response)
+        exits_match = re.search(r"\s*Exits:\s*([^]]+)\]", response)
         if exits_match:
             self.last_exits = exits_match.group(1).strip()

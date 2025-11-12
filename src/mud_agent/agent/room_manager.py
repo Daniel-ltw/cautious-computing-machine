@@ -115,6 +115,23 @@ class RoomManager:
                 pre_cmds=[],
             )
 
+    def _get_direction_from_command(self, command: str) -> Optional[str]:
+        """Extracts a direction from a command string."""
+        parts = command.lower().split()
+        direction_map = {
+            "n": "north", "north": "north",
+            "s": "south", "south": "south",
+            "e": "east", "east": "east",
+            "w": "west", "west": "west",
+            "u": "up", "up": "up",
+            "d": "down", "down": "down",
+        }
+        # Also check for abbreviated directions like 'n' as a whole word
+        for part in reversed(parts):
+            if part in direction_map:
+                return direction_map[part]
+        return None
+
     async def _on_room_update(self, **kwargs):
         """Handles the room_update event from the StateManager."""
         room_data = kwargs.get("room_data", kwargs)
@@ -138,13 +155,27 @@ class RoomManager:
                         f"Successful move detected. Recording exit: from {previous_room_num_on_exit} to {incoming_room_num} "
                         f"cmd='{self.pending_exit_command}' pre_cmds={self.pending_pre_commands}"
                     )
+                    move_direction = self._get_direction_from_command(self.pending_exit_command)
+                    valid_pre_commands = []
+                    if move_direction:
+                        for pre_cmd in self.pending_pre_commands:
+                            pre_cmd_direction = self._get_direction_from_command(pre_cmd)
+                            if pre_cmd_direction and pre_cmd_direction == move_direction:
+                                valid_pre_commands.append(pre_cmd)
+                            else:
+                                self.logger.warning(f"Invalid pre-command '{{pre_cmd}}' does not match move direction '{{move_direction}}'.")
+                    else:
+                        # If move command has no direction, no pre-commands are considered valid
+                        self.logger.warning(f"Move command '{{self.pending_exit_command}}' has no direction. All pre-commands invalidated.")
+                        self.pending_pre_commands.clear()
+
                     try:
                         await self.knowledge_graph.record_exit_success(
                             from_room_num=previous_room_num_on_exit,
                             to_room_num=incoming_room_num,
                             direction=self.pending_exit_command,
                             move_cmd=self.pending_exit_command,
-                            pre_cmds=list(self.pending_pre_commands),
+                            pre_cmds=valid_pre_commands,
                         )
                     except Exception:
                         self.logger.exception("Error recording exit success in knowledge graph.")
