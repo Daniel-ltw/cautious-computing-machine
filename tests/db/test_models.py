@@ -1,0 +1,191 @@
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from mud_agent.db.models import (
+    NPC,
+    Entity,
+    Observation,
+    Relation,
+    Room,
+    RoomExit,
+    db,
+    find_path_between_rooms,
+    get_database_stats,
+    get_entity_by_name,
+    get_room_by_number,
+    get_room_exits,
+)
+
+
+@pytest.fixture(scope="function")
+def test_db():
+    """Create a temporary database for testing."""
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_db:
+        test_db_path = tmp_db.name
+    db.init(test_db_path)
+    db.connect()
+    db.create_tables([Entity, Room, RoomExit, NPC, Observation, Relation])
+    yield
+    db.drop_tables([Entity, Room, RoomExit, NPC, Observation, Relation])
+    db.close()
+    Path(test_db_path).unlink()
+
+
+
+def test_entity_creation(test_db):
+    """Test Entity creation."""
+    room_entity = Entity.create(name="Test Room", entity_type="Room")
+    assert room_entity.name == "Test Room"
+    npc_entity = Entity.create(name="Test NPC", entity_type="NPC")
+    assert npc_entity.name == "Test NPC"
+
+def test_room_creation(test_db):
+    """Test Room creation."""
+    room_entity = Entity.create(name="Test Room", entity_type="Room")
+    test_room = Room.create(
+        entity=room_entity,
+        room_number=1001,
+        terrain="inside",
+        zone="Test Zone",
+        full_name="A Test Room",
+        outside=False,
+        coord_x=10, coord_y=20, coord_z=0
+    )
+    assert test_room.room_number == 1001
+
+def test_room_exit_creation(test_db):
+    """Test RoomExit creation."""
+    room_entity1 = Entity.create(name="Test Room 1", entity_type="Room")
+    test_room1 = Room.create(entity=room_entity1, room_number=1001)
+    room_entity2 = Entity.create(name="Test Room 2", entity_type="Room")
+    test_room2 = Room.create(entity=room_entity2, room_number=1002)
+    room_exit = RoomExit.create(
+        from_room=test_room1,
+        direction="north",
+        to_room_number=1002,
+        to_room=test_room2,
+        details='{"door": "open"}'
+    )
+    assert room_exit.direction == "north"
+
+def test_npc_creation(test_db):
+    """Test NPC creation."""
+    room_entity = Entity.create(name="Test Room", entity_type="Room")
+    test_room = Room.create(entity=room_entity, room_number=1001)
+    npc_entity = Entity.create(name="Test NPC", entity_type="NPC")
+    test_npc = NPC.create(
+        entity=npc_entity,
+        current_room=test_room,
+        npc_type="questor"
+    )
+    assert test_npc.npc_type == "questor"
+
+def test_observation_creation(test_db):
+    """Test Observation creation."""
+    room_entity = Entity.create(name="Test Room", entity_type="Room")
+    observation = Observation.create(
+        entity=room_entity,
+        observation_text="This is a test observation",
+        observation_type="description"
+    )
+    assert observation.observation_type == "description"
+
+def test_relation_creation(test_db):
+    """Test Relation creation."""
+    room_entity = Entity.create(name="Test Room", entity_type="Room")
+    npc_entity = Entity.create(name="Test NPC", entity_type="NPC")
+    relation = Relation.create(
+        from_entity=room_entity,
+        to_entity=npc_entity,
+        relation_type="contains",
+        metadata='{"visible": true}'
+    )
+    assert relation.relation_type == "contains"
+
+def test_query_functions(test_db):
+    """Test query functions."""
+    room_entity1 = Entity.create(name="Test Room 1", entity_type="Room")
+    test_room1 = Room.create(entity=room_entity1, room_number=1001)
+    room_entity2 = Entity.create(name="Test Room 2", entity_type="Room")
+    test_room2 = Room.create(entity=room_entity2, room_number=1002)
+    RoomExit.create(from_room=test_room1, direction="north", to_room_number=1002, to_room=test_room2)
+
+    found_room = get_room_by_number(1001)
+    assert found_room is not None
+    assert found_room.room_number == 1001
+
+    found_entity = get_entity_by_name("Test Room 1", "Room")
+    assert found_entity is not None
+    assert found_entity.name == "Test Room 1"
+
+    exits = get_room_exits(1001)
+    assert len(exits) == 1
+    assert exits[0].direction == "north"
+
+    path = find_path_between_rooms(1001, 1002)
+    assert len(path) == 1
+    assert path[0] == "north"
+
+def test_database_stats(test_db):
+    """Test database statistics."""
+    room_entity = Entity.create(name="Test Room", entity_type="Room")
+    Room.create(entity=room_entity, room_number=1001)
+    npc_entity = Entity.create(name="Test NPC", entity_type="NPC")
+    NPC.create(entity=npc_entity)
+    Observation.create(entity=room_entity, observation_text="text")
+    Relation.create(from_entity=room_entity, to_entity=npc_entity, relation_type="contains")
+
+    stats = get_database_stats()
+    assert stats['Entity'] >= 2
+    assert stats['Room'] >= 1
+    assert stats['NPC'] >= 1
+    assert stats['Observation'] >= 1
+    assert stats['Relation'] >= 1
+
+
+def test_record_exit_success_with_enter_variations(test_db):
+    room_entity1 = Entity.create(name="Room A", entity_type="Room")
+    room_entity2 = Entity.create(name="Room B", entity_type="Room")
+    room_a = Room.create(entity=room_entity1, room_number=2001)
+    room_b = Room.create(entity=room_entity2, room_number=2002)
+
+    exit_obj = RoomExit.create(from_room=room_a, direction="enter gate", to_room_number=2002, to_room=room_b)
+
+    exit_obj.record_exit_success(move_command="enter portal", pre_commands=["unlock portal"]) 
+
+    details = exit_obj.get_command_details()
+    assert details["move_command"] == "enter portal"
+    assert details["pre_commands"] == ["unlock portal"]
+
+
+def test_record_exit_success_updates_latest_commands(test_db):
+    room_entity1 = Entity.create(name="Room A", entity_type="Room")
+    room_entity2 = Entity.create(name="Room B", entity_type="Room")
+    room_a = Room.create(entity=room_entity1, room_number=3001)
+    room_b = Room.create(entity=room_entity2, room_number=3002)
+
+    exit_obj = RoomExit.create(from_room=room_a, direction="north", to_room_number=3002, to_room=room_b)
+
+    exit_obj.record_exit_success(move_command="north", pre_commands=["open north"]) 
+    first_details = exit_obj.get_command_details()
+    assert first_details["pre_commands"] == ["open north"]
+
+    exit_obj.record_exit_success(move_command="north", pre_commands=["unlock north"]) 
+    second_details = exit_obj.get_command_details()
+    assert second_details["pre_commands"] == ["unlock north"]
+    assert second_details["last_success_at"] != first_details["last_success_at"]
+
+
+def test_record_exit_success_cardinal_synonyms(test_db):
+    room_entity1 = Entity.create(name="Room A", entity_type="Room")
+    room_entity2 = Entity.create(name="Room B", entity_type="Room")
+    room_a = Room.create(entity=room_entity1, room_number=3101)
+    room_b = Room.create(entity=room_entity2, room_number=3102)
+
+    exit_obj = RoomExit.create(from_room=room_a, direction="n", to_room_number=3102, to_room=room_b)
+
+    exit_obj.record_exit_success(move_command="north", pre_commands=[]) 
+    details = exit_obj.get_command_details()
+    assert details["move_command"] == "north"

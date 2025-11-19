@@ -3,12 +3,11 @@
 Provides configurable layout options and backward compatibility.
 """
 
+import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Any, Optional
-import json
-import os
 from pathlib import Path
+from typing import Any
 
 
 class LayoutMode(Enum):
@@ -39,7 +38,7 @@ class LayoutConfig:
     show_header: bool = False
     show_footer: bool = False
     theme: str = "tokyo-night"
-    
+
     def __post_init__(self):
         if self.dimensions is None:
             self.dimensions = LayoutDimensions()
@@ -47,8 +46,8 @@ class LayoutConfig:
 
 class LayoutManager:
     """Manages layout configuration and preferences."""
-    
-    def __init__(self, config_dir: Optional[Path] = None):
+
+    def __init__(self, config_dir: Path | None = None):
         """Initialize layout manager.
         
         Args:
@@ -57,31 +56,34 @@ class LayoutManager:
         self.config_dir = config_dir or Path.home() / ".mud_agent"
         self.config_file = self.config_dir / "layout_config.json"
         self._config = self._load_config()
-    
+
     def _load_config(self) -> LayoutConfig:
         """Load configuration from file or create default."""
         if self.config_file.exists():
             try:
-                with open(self.config_file, 'r') as f:
+                with open(self.config_file) as f:
                     data = json.load(f)
                 return self._dict_to_config(data)
             except (json.JSONDecodeError, KeyError) as e:
-                print(f"Warning: Invalid config file, using defaults: {e}")
-        
+                import logging
+                logging.getLogger(__name__).warning(
+                    f"Invalid layout config file, using defaults: {e}"
+                )
+
         return LayoutConfig()
-    
-    def _dict_to_config(self, data: Dict[str, Any]) -> LayoutConfig:
+
+    def _dict_to_config(self, data: dict[str, Any]) -> LayoutConfig:
         """Convert dictionary to LayoutConfig."""
         dimensions_data = data.get('dimensions', {})
         dimensions = LayoutDimensions(**dimensions_data)
-        
+
         config_data = data.copy()
         config_data['mode'] = LayoutMode(data.get('mode', 'classic'))
         config_data['dimensions'] = dimensions
-        
+
         return LayoutConfig(**config_data)
-    
-    def _config_to_dict(self, config: LayoutConfig) -> Dict[str, Any]:
+
+    def _config_to_dict(self, config: LayoutConfig) -> dict[str, Any]:
         """Convert LayoutConfig to dictionary."""
         return {
             'mode': config.mode.value,
@@ -99,37 +101,37 @@ class LayoutManager:
             'show_footer': config.show_footer,
             'theme': config.theme,
         }
-    
+
     def save_config(self) -> None:
         """Save current configuration to file."""
         self.config_dir.mkdir(exist_ok=True)
-        
+
         with open(self.config_file, 'w') as f:
             json.dump(self._config_to_dict(self._config), f, indent=2)
-    
+
     @property
     def config(self) -> LayoutConfig:
         """Get current configuration."""
         return self._config
-    
+
     def set_layout_mode(self, mode: LayoutMode) -> None:
         """Set layout mode and save."""
         self._config.mode = mode
         self.save_config()
-    
+
     def set_dimensions(self, **kwargs) -> None:
         """Update layout dimensions."""
         for key, value in kwargs.items():
             if hasattr(self._config.dimensions, key):
                 setattr(self._config.dimensions, key, value)
         self.save_config()
-    
+
     def reset_to_defaults(self) -> None:
         """Reset configuration to defaults."""
         self._config = LayoutConfig()
         self.save_config()
-    
-    def get_css_variables(self) -> Dict[str, str]:
+
+    def get_css_variables(self) -> dict[str, str]:
         """Get CSS variables for current configuration."""
         dims = self._config.dimensions
         return {
@@ -140,15 +142,15 @@ class LayoutManager:
             '--widget-spacing': str(dims.widget_spacing),
             '--container-padding': str(dims.container_padding),
         }
-    
+
     def is_classic_layout(self) -> bool:
         """Check if using classic layout mode."""
         return self._config.mode == LayoutMode.CLASSIC
-    
+
     def is_responsive_enabled(self) -> bool:
         """Check if responsive design is enabled."""
         return self._config.enable_responsive
-    
+
     def get_mobile_breakpoint(self) -> int:
         """Get mobile breakpoint width."""
         return self._config.mobile_breakpoint

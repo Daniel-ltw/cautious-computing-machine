@@ -325,20 +325,19 @@ class MUDClientTool(Tool):
                 )
                 self._update_room_info(collected_responses)
                 return collected_responses
-            else:
 
-                # Try to get responses directly from command_responses
-                if (
-                    hasattr(self.client, "command_responses")
-                    and self.client.command_responses
-                ):
-                    direct_responses = "\n".join(self.client.command_responses)
-                    if direct_responses:
-                        self.logger.debug(
-                            f"Using direct command_responses ({len(direct_responses)} chars)"
-                        )
-                        self._update_room_info(direct_responses)
-                        return direct_responses
+            # Try to get responses directly from command_responses
+            elif (
+                hasattr(self.client, "command_responses")
+                and self.client.command_responses
+            ):
+                direct_responses = "\n".join(self.client.command_responses)
+                if direct_responses:
+                    self.logger.debug(
+                        f"Using direct command_responses ({len(direct_responses)} chars)"
+                    )
+                    self._update_room_info(direct_responses)
+                    return direct_responses
 
         return ""
 

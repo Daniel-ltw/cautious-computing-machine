@@ -1,10 +1,11 @@
-from typing import Any
+from typing import Any, ClassVar
 
 from rich.text import Text
-from textual.widgets import Static
 from textual.reactive import reactive
+from textual.widgets import Static
 
 from .state_listener import StateListener
+
 
 class RoomMapWidget(StateListener, Static):
     """A widget to display a 5x3 ASCII art representation of a single MUD room.
@@ -28,7 +29,7 @@ class RoomMapWidget(StateListener, Static):
 
     # A mapping from cardinal and vertical direction abbreviations to the
     # corresponding grid coordinates (row, column) and character for drawing.
-    DRAW_MAP = {
+    DRAW_MAP: ClassVar[dict[str, tuple[int, int, str]]] = {
         "N": (0, 2, "|"),
         "S": (2, 2, "|"),
         "E": (1, 4, "-"),
@@ -37,7 +38,7 @@ class RoomMapWidget(StateListener, Static):
         "D": (2, 0, "/"),
     }
     # Characters used for drawing the room itself.
-    ROOM_CHARS = {
+    ROOM_CHARS: ClassVar[dict[str, str]] = {
         "LEFT": "[",
         "RIGHT": "]",
         "CURRENT": "@",
@@ -58,9 +59,10 @@ class RoomMapWidget(StateListener, Static):
 
     def on_mount(self) -> None:
         """Set up the widget's initial styles when it is mounted."""
-        super().on_mount()
         self.styles.text_align = "center"
         self.styles.vertical_align = "middle"
+        self.styles.width = 5
+        self.styles.height = 3
 
     def update_room_data(self, data: dict[str, Any]) -> None:
         """Update the room data and trigger a refresh of the widget.
@@ -78,7 +80,10 @@ class RoomMapWidget(StateListener, Static):
         Returns:
             Text: A Rich Text object representing the rendered room.
         """
-        if not self.room_data.get("num"):
+        # Render a room box if we have a valid room number OR if this is the current room.
+        # Otherwise render a dot to keep the grid light.
+        has_room = bool(self.room_data.get("num")) or bool(self.room_data.get("placeholder"))
+        if not has_room and not self.is_current:
             return Text("  .  ", justify="center")
 
         grid = [[' ' for _ in range(5)] for _ in range(3)]

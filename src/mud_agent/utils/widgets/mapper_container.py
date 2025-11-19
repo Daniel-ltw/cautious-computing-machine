@@ -1,32 +1,26 @@
 import logging
-from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Container, Grid
-from textual.widgets import TabbedContent, TabPane
 from textual.reactive import reactive
+from textual.widgets import TabbedContent, TabPane
 
-from ..room_entity_extractor import extract_rooms_from_db
+from mud_agent.db.models import Room
 
 from .room_map_widget import RoomMapWidget
 from .state_listener import StateListener
-
-from textual.widget import Widget
-from textual.widgets import Static
-
-from ...db.models import Room
 
 
 class MapperContainer(StateListener, Container):
     """Container for arranging RoomMapWidget instances in a grid, centering the current room."""
 
-    GRID_ROWS = 7
+    GRID_ROWS = 9
     GRID_COLS = 11
     CENTER_ROW = GRID_ROWS // 2
     CENTER_COL = GRID_COLS // 2
     CENTER_Z = 1
+    LEVELS = (0, 1, 2)
 
     current_room_num = reactive(0)
     register_for_room_events = True
@@ -55,12 +49,12 @@ class MapperContainer(StateListener, Container):
         logger = logging.getLogger(__name__)
         logger.info("MapperContainer.on_mount called")
 
-        for z in [0, 1, 2]:
+        for z in self.LEVELS:
             try:
                 grid = self.query_one(f"#map-grid-z{z}", Grid)
                 grid.styles.grid_size_columns = self.GRID_COLS
                 grid.styles.grid_size_rows = self.GRID_ROWS
-                grid.styles.grid_gutter_vertical = 1
+                grid.styles.grid_gutter_vertical = 0
                 grid.styles.grid_gutter_horizontal = 0
                 grid.styles.align_x = "center"
                 grid.styles.align_y = "middle"
@@ -73,6 +67,14 @@ class MapperContainer(StateListener, Container):
                         grid.mount(widget)
             except Exception as e:
                 logger.error(f"Failed to style or populate grid for z={z}: {e}")
+
+        try:
+            content_width = self.GRID_COLS * 5
+            self.styles.width = content_width
+            self.styles.min_width = content_width
+            self.styles.max_width = content_width
+        except Exception:
+            pass
 
         self._rebuild_widgets()
 
@@ -90,7 +92,7 @@ class MapperContainer(StateListener, Container):
         if not self.current_room_num:
             return
 
-        current_room = Room.get(room_number=self.current_room_num).to_info()
+        current_room = self._get_current_room_info()
         if not current_room:
             logger.warning(f"Current room {self.current_room_num} not found in rooms data.")
             return
@@ -102,14 +104,25 @@ class MapperContainer(StateListener, Container):
         rooms_to_display[(self.CENTER_ROW, self.CENTER_COL, self.CENTER_Z)] = current_room
 
         # Call the adjacents method
+        center_pos = (self.CENTER_ROW, self.CENTER_COL, self.CENTER_Z)
         self._update_adjacent_by_depth(
             rooms_to_display,
             current_room,
-            self.CENTER_COL,
-            self.CENTER_ROW,
-            self.CENTER_Z,
+            center_pos,
             6,
         )
+
+        # Ensure cardinal neighbors render on Level 0 even when targets are unresolved
+        try:
+            cx, cy, cz = center_pos
+            for dir_key in ("n", "e", "s", "w"):
+                if dir_key in (current_room.get("exits") or {}):
+                    nr, nc, nz = self._get_mapper_coords(cx, cy, cz, dir_key)
+                    k = (nr, nc, nz)
+                    if k not in rooms_to_display:
+                        rooms_to_display[k] = {"num": -1, "exits": {}, "placeholder": True}
+        except Exception:
+            pass
 
         # Now, update the widgets
         for (r, c, z), room_data in rooms_to_display.items():
@@ -127,68 +140,147 @@ class MapperContainer(StateListener, Container):
         data = kwargs.get("room_data", {})
         logger = logging.getLogger(__name__)
         new_room_num = data.get("num")
+        try:
+            if isinstance(new_room_num, str) and new_room_num.isdigit():
+                new_room_num = int(new_room_num)
+        except Exception:
+            pass
         if new_room_num and new_room_num != self.current_room_num:
             logger.debug(f"Room update received: {new_room_num}")
             self.current_room_num = new_room_num
-            # Potentially highlight the current room, but don't rebuild the whole grid
-            # self._highlight_current_room()
+            pass
 
     def _on_state_update(self, data: Any) -> None:
         pass
 
     def watch_current_room_num(self, old, new):
         """Watch for changes in current room number."""
-        logger = logging.getLogger(__name__)
         self._rebuild_widgets()
 
-    def _update_adjacent_by_depth(self, rooms_to_display, current_room, current_x, current_y, current_z, depth = 1):
-        for direction, room_num in current_room["exits"].items():
+    def _update_adjacent_by_depth(self, rooms_to_display, current_room, current_pos, depth = 1):
+        current_r, current_c, current_z = current_pos
+        for direction, room_num in current_room.get("exits", {}).items():
             if direction not in self._get_mapper_coords_positions():
                 continue
+            # Skip exits without a resolvable target room number
+            try:
+                dest_room_num = room_num
+                if isinstance(dest_room_num, str):
+                    dest_room_num = int(dest_room_num) if dest_room_num.isdigit() else None
+            except Exception:
+                dest_room_num = None
 
-            new_x, new_y, new_z = self._get_mapper_coords(
-                current_x,
-                current_y,
+            new_r, new_c, new_z = self._get_mapper_coords(
+                current_r,
+                current_c,
                 current_z,
-                direction
+                direction,
             )
-            if new_x == self.CENTER_COL and new_y == self.CENTER_ROW and new_z == self.CENTER_Z:
+            if new_c == self.CENTER_COL and new_r == self.CENTER_ROW and new_z == self.CENTER_Z:
                 # If center room, skip
                 continue
-            if new_x >= self.GRID_COLS or new_x < 0 or new_y >= self.GRID_ROWS or new_y < 0 or new_z < 0 or new_z > 2:
+            if new_c >= self.GRID_COLS or new_c < 0 or new_r >= self.GRID_ROWS or new_r < 0 or new_z not in self.LEVELS:
                 continue
             try:
-                new_room = Room.get(room_number=room_num).to_info()
+                if isinstance(dest_room_num, int) and dest_room_num > 0:
+                    new_room = Room.get(room_number=dest_room_num).to_info()
+                else:
+                    raise Room.DoesNotExist
             except Room.DoesNotExist:
+                # Placeholder room when destination is unknown
                 new_room = {
-                    "num": room_num,
-                    "exits": {}
+                    "num": dest_room_num if dest_room_num else -1,
+                    "exits": {},
+                    "placeholder": True,
                 }
-            rooms_to_display[(new_y, new_x, new_z)] = new_room
+            rooms_to_display[(new_r, new_c, new_z)] = new_room
             if depth > 1:
                 current_depth = depth - 1
                 self._update_adjacent_by_depth(
                     rooms_to_display,
                     new_room,
-                    new_x,
-                    new_y,
-                    new_z,
+                    (new_r, new_c, new_z),
                     current_depth,
                 )
+
+    def _get_current_room_info(self) -> dict[str, Any] | None:
+        room = None
+        try:
+            room = Room.get(room_number=self.current_room_num).to_info()
+        except Room.DoesNotExist:
+            room = None
+        if room:
+            return room
+        fallback = {}
+        try:
+            if getattr(self, "state_manager", None) and hasattr(self.state_manager, "get_current_room_data"):
+                fallback = self.state_manager.get_current_room_data() or {}
+            elif hasattr(self.app, "agent") and hasattr(self.app.agent, "aardwolf_gmcp"):
+                fallback = self.app.agent.aardwolf_gmcp.get_room_info() or {}
+        except Exception:
+            fallback = {}
+        if fallback:
+            if "num" not in fallback:
+                fallback["num"] = self.current_room_num
+            else:
+                try:
+                    num_val = fallback.get("num")
+                    if isinstance(num_val, str) and num_val.isdigit():
+                        fallback["num"] = int(num_val)
+                except Exception:
+                    pass
+            if not fallback.get("num") or fallback.get("num") == 0:
+                try:
+                    if getattr(self, "state_manager", None) and getattr(self.state_manager, "room_num", 0):
+                        fallback["num"] = int(self.state_manager.room_num)
+                except Exception:
+                    pass
+            raw_exits = fallback.get("exits") or {}
+            normalized_exits: dict[str, int | None] = {}
+            try:
+                if isinstance(raw_exits, dict):
+                    for k, v in raw_exits.items():
+                        key = str(k).lower()
+                        if isinstance(v, dict):
+                            num = v.get("num")
+                            normalized_exits[key] = int(num) if isinstance(num, int) or (isinstance(num, str) and num.isdigit()) else None
+                        elif isinstance(v, int):
+                            normalized_exits[key] = v
+                        elif isinstance(v, str) and v.isdigit():
+                            normalized_exits[key] = int(v)
+                        else:
+                            # Keep the direction even if target is unresolved
+                            normalized_exits[key] = None
+                elif isinstance(raw_exits, list):
+                    for item in raw_exits:
+                        if isinstance(item, dict):
+                            key = str(item.get("dir") or item.get("direction") or "").lower()
+                            num = item.get("num")
+                            if key:
+                                normalized_exits[key] = int(num) if isinstance(num, int) or (isinstance(num, str) and num.isdigit()) else None
+                        elif isinstance(item, str):
+                            # GMCP often provides exits as a simple list of direction strings
+                            normalized_exits[item.lower()] = None
+            except Exception:
+                normalized_exits = {}
+            # Keep exits even when unresolved; adjacency will render placeholders for unknowns
+            fallback["exits"] = normalized_exits
+            return fallback
+        return None
 
 
     def _get_mapper_coords_positions(self):
         return {
-            "n": (0, -1, 0),
-            "s": (0, 1, 0),
-            "e": (1, 0, 0),
-            "w": (-1, 0, 0),
+            "n": (-1, 0, 0),
+            "s": (1, 0, 0),
+            "e": (0, 1, 0),
+            "w": (0, -1, 0),
             "u": (0, 0, 1),
             "d": (0, 0, -1),
         }
 
-    def _get_mapper_coords(self, x, y, z, direction):
+    def _get_mapper_coords(self, r, c, z, direction):
         # Position mapping for exits (0-indexed, relative to center)
         positions = self._get_mapper_coords_positions()
-        dx, dy, dz = positions[direction]
-        return x + dx, y + dy, z + dz
+        dr, dc, dz = positions[direction]
+        return r + dr, c + dc, z + dz

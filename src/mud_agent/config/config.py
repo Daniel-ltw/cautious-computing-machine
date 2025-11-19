@@ -66,7 +66,7 @@ class LogConfig:
 
     level: str = "INFO"
     format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    file: str | None = "mud_agent.log"  # Default to a log file in the current directory
+    file: str | None = None
 
     @classmethod
     def from_env(cls) -> "LogConfig":
@@ -75,10 +75,12 @@ class LogConfig:
         Returns:
             LogConfig: A new LogConfig instance.
         """
+        raw_file = os.getenv("LOG_FILE", "none")
+        file = None if str(raw_file).strip().lower() in {"", "none", "false"} else raw_file
         return cls(
             level=os.getenv("LOG_LEVEL", cls.level),
             format=os.getenv("LOG_FORMAT", cls.format),
-            file=os.getenv("LOG_FILE", cls.file),
+            file=file,
         )
 
 

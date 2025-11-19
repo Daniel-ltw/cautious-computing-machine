@@ -11,8 +11,8 @@ to receive notifications when the state changes.
 This is the single source of truth for all game state in the MUD agent.
 """
 
-import asyncio
 import ast
+import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -22,7 +22,6 @@ from textual.reactive import reactive
 from textual.widget import Widget
 
 from ..utils.event_emitter import EventEmitter
-
 
 # Constants for status thresholds
 ONE_HUNDRED_PERCENT = 100
@@ -157,6 +156,7 @@ class StateManager(Widget):
         super().__init__(name="state_manager")
 
         self.logger = logging.getLogger(__name__)
+        self.listeners: dict[str, Callable] = {}
         self.logger.debug("StateManager initialized with agent: %s", agent)
         self.agent = agent
 
@@ -234,6 +234,32 @@ class StateManager(Widget):
 
         self.events.on("state_update", self.handle_state_update)
 
+    def register_listener(self, listener_id: str, callback: Callable) -> None:
+        """Register a listener for state updates."""
+        self.listeners[listener_id] = callback
+        self.logger.debug(f"Registered listener: {listener_id}")
+
+    def unregister_listener(self, listener_id: str) -> None:
+        """Unregister a listener."""
+        if listener_id in self.listeners:
+            del self.listeners[listener_id]
+            self.logger.debug(f"Unregistered listener: {listener_id}")
+
+    async def notify_listeners(self, state_key: str, data: Any) -> None:
+        """Notify listeners of a state change."""
+        self.logger.debug(f"Notifying listeners for state_key: {state_key} with data: {data}")
+        for listener_id, callback in self.listeners.items():
+            try:
+                result = callback(state_key, data)
+                import asyncio
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                self.logger.error(
+                    f"Error notifying listener {listener_id}: {e}", exc_info=True
+                )
+
+
     def handle_state_update(self, updates: dict) -> None:
         """Handle state updates from events."""
         if "room" in updates:
@@ -291,6 +317,7 @@ class StateManager(Widget):
                 # Update room info directly
                 if "name" in room_info:
                     self.room_name = room_info["name"]
+                    asyncio.create_task(self.notify_listeners("room_name", self.room_name))
                 if "area" in room_info:
                     self.area_name = room_info["area"]
                 if "exits" in room_info:
@@ -504,6 +531,16 @@ class StateManager(Widget):
                     elif stat_name == "luck":
                         self.luck_max = max_stat_value
 
+            # Update status effects
+            if "status" in data:
+                status_effects = data["status"]
+                if isinstance(status_effects, list):
+                    self.status_effects = status_effects
+                    updates["status_effects"] = status_effects
+                    asyncio.create_task(
+                        self.notify_listeners("status_effects", self.status_effects)
+                    )
+
             # Update worth
             if "gold" in data and data["gold"] is not None:
                 gold_value = int(data["gold"])
@@ -534,6 +571,7 @@ class StateManager(Widget):
             if "status" in data and isinstance(data["status"], list):
                 self.status_effects = data["status"]
                 self.status = data["status"]  # For backward compatibility
+                asyncio.create_task(self.notify_listeners("status_effects", self.status_effects))
                 updates["status_effects"] = data["status"]
 
             # Emit events

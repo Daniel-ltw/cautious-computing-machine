@@ -6,13 +6,6 @@ This module handles room tracking, navigation, and related functionality.
 
 import asyncio
 import logging
-import re
-import time
-import json
-from typing import Dict, List, Optional, Set
-from ..db.models import RoomExit, Room
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +18,12 @@ class RoomManager:
         self.events = agent.events
         self.knowledge_graph = agent.knowledge_graph
         self.logger = logging.getLogger(__name__)
-        self.pending_exit_command: Optional[str] = None
+        self.pending_exit_command: str | None = None
         # Commands that should be executed before movement (e.g., opening/unlocking doors)
-        self.pending_pre_commands: Set[str] = set()
-        self.from_room_num_on_exit: Optional[int] = None
-        self.current_room: Optional[dict] = None
-        self.current_exits: Optional[dict] = {}
+        self.pending_pre_commands: set[str] = set()
+        self.from_room_num_on_exit: int | None = None
+        self.current_room: dict | None = None
+        self.current_exits: dict | None = {}
 
     async def setup(self):
         """Subscribe to relevant events."""
@@ -41,59 +34,53 @@ class RoomManager:
 
     async def _handle_command_sent(self, command: str) -> None:
         """Handle the command_sent event."""
-        # TODO: Make this more robust, using a list of aliases for movement commands
-        cmd_lower = command.lower()
-
-        if ";" in cmd_lower:
-            self.pending_exit_command = None
-            self.pending_pre_commands.clear()
-            return
+        cmd_lower = command.lower().strip()
 
         movement_commands = [
             "n", "s", "e", "w", "u", "d",
             "north", "south", "east", "west", "up", "down",
         ]
-        startswith_commands = ["enter ", "board", "escape", "say "]
-
-        # Pre-commands typically required before movement (e.g., opening closed doors)
+        startswith_commands = ["enter ", "board", "escape", "climb"]
         pre_command_verbs = [
             "open", "unlock", "pick", "bash", "break", "kick", "force", "unbar", "unlatch",
         ]
 
-        # Detect and record pre-commands (do not wait for room update for these)
-        if any(cmd_lower.startswith(v) for v in pre_command_verbs):
-            self.pending_pre_commands.add(command.strip())
-            # Remember the room we initiated the sequence from, if not already set
-            if self.from_room_num_on_exit is None:
-                self.from_room_num_on_exit = (
-                    self.current_room.get("num") if self.current_room else None
-                )
-            self.logger.debug(f"Recorded pre-command `{command}` in room {self.from_room_num_on_exit}.")
-            return
+        tokens = [t.strip() for t in cmd_lower.split(";") if t.strip()] if ";" in cmd_lower else [cmd_lower]
 
-        if cmd_lower.startswith("say "):
-            asyncio.create_task(self.events.emit("force_exit_check", command=command))
+        pending_exit = None
+        for tok in tokens:
+            if tok.startswith("say "):
+                asyncio.create_task(self.events.emit("force_exit_check", command=tok))
 
-        if cmd_lower in movement_commands or any(cmd_lower.startswith(c) for c in startswith_commands):
-            self.pending_exit_command = command.strip()
+            if pending_exit is None and any(tok.startswith(v) for v in pre_command_verbs):
+                self.pending_pre_commands.add(tok)
+                if self.from_room_num_on_exit is None:
+                    self.from_room_num_on_exit = (
+                        self.current_room.get("num") if self.current_room else None
+                    )
+                continue
+
+            if pending_exit is None and (
+                tok in movement_commands or any(tok.startswith(c) for c in startswith_commands)
+            ):
+                pending_exit = tok
+                break
+
+        if pending_exit:
+            self.pending_exit_command = pending_exit
             from_room_num = self.current_room.get("num") if self.current_room else None
             self.from_room_num_on_exit = from_room_num
-
             self.logger.debug(
-                f"Movement command `{command}` sent from room {from_room_num}."
+                f"Movement command `{self.pending_exit_command}` sent from room {from_room_num}."
             )
-            # Wait for the room to change
             try:
                 await asyncio.wait_for(self.events.wait("room_update"), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self.logger.warning(f"Timeout waiting for room update after command: {command}")
-                # Movement attempt failed or timed out; clear pending movement and any pre-commands
                 self.pending_exit_command = None
                 self.from_room_num_on_exit = None
                 self.pending_pre_commands.clear()
         else:
-            # Non-movement command; do not clear recorded pre-commands as they may precede a later movement
-            # We only clear the pending exit command itself, if one was somehow pending.
             self.pending_exit_command = None
 
     async def _handle_force_exit_check(self, command: str) -> None:
@@ -115,7 +102,7 @@ class RoomManager:
                 pre_cmds=[],
             )
 
-    def _get_direction_from_command(self, command: str) -> Optional[str]:
+    def _get_direction_from_command(self, command: str) -> str | None:
         """Extracts a direction from a command string."""
         parts = command.lower().split()
         direction_map = {
@@ -151,7 +138,7 @@ class RoomManager:
             if self.pending_exit_command:
                 # This is the key logic: only act if the room number has actually changed.
                 if previous_room_num_on_exit is not None and previous_room_num_on_exit != incoming_room_num:
-                    self.logger.debug(
+                    self.logger.warning(
                         f"Successful move detected. Recording exit: from {previous_room_num_on_exit} to {incoming_room_num} "
                         f"cmd='{self.pending_exit_command}' pre_cmds={self.pending_pre_commands}"
                     )
@@ -163,11 +150,11 @@ class RoomManager:
                             if pre_cmd_direction and pre_cmd_direction == move_direction:
                                 valid_pre_commands.append(pre_cmd)
                             else:
-                                self.logger.warning(f"Invalid pre-command '{{pre_cmd}}' does not match move direction '{{move_direction}}'.")
+                                self.logger.warning("Invalid pre-command '{pre_cmd}' does not match move direction '{move_direction}'.")
                     else:
-                        # If move command has no direction, no pre-commands are considered valid
-                        self.logger.warning(f"Move command '{{self.pending_exit_command}}' has no direction. All pre-commands invalidated.")
-                        self.pending_pre_commands.clear()
+                        # Directionless move command (e.g., enter portal) - all pre-commands are valid
+                        self.logger.info("Directionless move command '{self.pending_exit_command}' detected. All pre-commands are valid.")
+                        valid_pre_commands = list(self.pending_pre_commands)
 
                     try:
                         await self.knowledge_graph.record_exit_success(
@@ -197,9 +184,10 @@ class RoomManager:
             self.current_exits = room_data.get("exits", {})
 
             self.logger.debug(f"Updating knowledge graph with room data: {room_data}")
-            await self.knowledge_graph.add_entity(
-                {"entityType": "Room", **room_data}
-            )
+            try:
+                await self.knowledge_graph.add_entity({"entityType": "Room", **room_data})
+            except Exception:
+                self.logger.exception("Failed to update knowledge graph with room data")
 
             # Emit events for other components to consume
             asyncio.create_task(self.events.emit("state_update", update_type="room", data=room_data))

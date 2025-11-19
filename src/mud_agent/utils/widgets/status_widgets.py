@@ -29,6 +29,16 @@ class StatusEffectsWidget(StateListener, BaseWidget):
     # Register for specific event types
     register_for_status_events = True
 
+    def on_mount(self) -> None:
+        """Mount the widget."""
+        self.subscribe_to_state("status_effects")
+
+    async def update_display(self, data: Any) -> None:
+        """Updates the display with the new data."""
+        logger.debug(f"StatusEffectsWidget received data: {data}")
+        self.status_effects = data
+        self.update_content()
+
     def update_content(self):
         """Update the widget content."""
         # Clear the current content

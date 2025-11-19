@@ -5,7 +5,8 @@ leveraging an SQLite database via the Peewee ORM for robust and efficient data s
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any
 
 from peewee import DoesNotExist, fn
 
@@ -17,7 +18,6 @@ from ..db.models import (
     Room,
     RoomExit,
     db,
-    get_db_stats,
     find_path_between_rooms,
 )
 
@@ -60,7 +60,7 @@ class GameKnowledgeGraph:
             db.close()
             self.logger.info("Database connection closed.")
 
-    def get_exit_command_details(self, from_room_number: int, direction: str) -> Dict[str, Any]:
+    def get_exit_command_details(self, from_room_number: int, direction: str) -> dict[str, Any]:
         """Retrieve stored command sequence details for a room exit.
 
         Args:
@@ -99,7 +99,7 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving exit command details for room {from_room_number} {direction}: {e}", exc_info=True)
             return {}
 
-    async def add_entity(self, entity_data: Dict[str, Any]) -> Optional[Entity]:
+    async def add_entity(self, entity_data: dict[str, Any]) -> Entity | None:
         """Add or update an entity in the knowledge graph.
 
         Args:
@@ -109,8 +109,11 @@ class GameKnowledgeGraph:
             The created or updated Entity object, or None if data is invalid.
         """
         if not self._initialized:
-            self.logger.error("Cannot add entity: Knowledge graph not initialized.")
-            return None
+            try:
+                await self.initialize()
+            except Exception:
+                self.logger.error("Cannot add entity: Knowledge graph not initialized.")
+                return None
 
         entity_type = entity_data.get("entityType")
         if not entity_type:
@@ -150,7 +153,7 @@ class GameKnowledgeGraph:
 
     def add_relation(
         self, from_entity: Entity, to_entity: Entity, relation_type: str
-    ) -> Optional[Relation]:
+    ) -> Relation | None:
         """Add a directional relation between two entities.
 
         Args:
@@ -181,7 +184,7 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error adding relation: {e}", exc_info=True)
             return None
 
-    def get_entity(self, name: str) -> Optional[Entity]:
+    def get_entity(self, name: str) -> Entity | None:
         """Retrieve an entity by its name.
 
         Args:
@@ -203,7 +206,7 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving entity '{name}': {e}", exc_info=True)
             return None
 
-    def get_room_by_number(self, room_number: int) -> Optional[Room]:
+    def get_room_by_number(self, room_number: int) -> Room | None:
         """Retrieve a room by its number.
 
         Args:
@@ -224,7 +227,7 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving room '{room_number}': {e}", exc_info=True)
             return None
 
-    def get_rooms_by_area(self, area_name: str) -> List[Room]:
+    def get_rooms_by_area(self, area_name: str) -> list[Room]:
         """Retrieve all rooms within a specific area.
 
         Args:
@@ -243,7 +246,7 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving rooms for area '{area_name}': {e}", exc_info=True)
             return []
 
-    def get_room_with_unexplored_exits(self, area_name: str, visited_rooms: set) -> Optional[Room]:
+    def get_room_with_unexplored_exits(self, area_name: str, visited_rooms: set) -> Room | None:
         """Get a room in the specified area with at least one unexplored exit."""
         if not self._initialized:
             self.logger.error("Cannot get room with unexplored exits: Knowledge graph not initialized.")
@@ -272,7 +275,7 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving room with unexplored exits for area '{area_name}': {e}", exc_info=True)
             return None
 
-    def get_rooms_with_unexplored_exits(self, area_name: str) -> List[Room]:
+    def get_rooms_with_unexplored_exits(self, area_name: str) -> list[Room]:
         """Get a list of rooms in the specified area with at least one unexplored exit."""
         if not self._initialized:
             self.logger.error("Cannot get rooms with unexplored exits: Knowledge graph not initialized.")
@@ -297,12 +300,15 @@ class GameKnowledgeGraph:
         to_room_num: int,
         direction: str,
         move_cmd: str,
-        pre_cmds: Optional[List[str]] = None,
+        pre_cmds: list[str] | None = None,
     ) -> None:
         """Records a successful exit from one room to another."""
         if not self._initialized:
-            self.logger.error("Cannot record exit success: Knowledge graph not initialized.")
-            return
+            try:
+                await self.initialize()
+            except Exception:
+                self.logger.error("Cannot record exit success: Knowledge graph not initialized.")
+                return
 
         try:
             with db.atomic():
@@ -407,48 +413,7 @@ class GameKnowledgeGraph:
                 to_room_number=to_room_number,
             )
 
-    async def find_path_between_rooms(
-        self, start_room_id: int, end_room_identifier: [int, str], max_depth: int = 350
-    ) -> Optional[Dict[str, Any]]:
-        """Find a path between two rooms using BFS.
 
-        Args:
-            start_room_id: The room number of the starting room.
-            end_room_identifier: The room number or name of the destination room.
-            max_depth: The maximum depth to search.
-
-        Returns:
-            A dictionary containing the path and cost, or None if no path is found.
-        """
-        if not self._initialized:
-            self.logger.error("Cannot find path: Knowledge graph not initialized.")
-            return None
-
-        try:
-            try:
-                # If room identifier can be converted to int, then it is room number
-                end_room_id = int(end_room_identifier)
-            except (ValueError, TypeError):
-                # Otherwise treat it as a room name
-                room = Room.get(fn.LOWER(Room.full_name).contains(end_room_identifier.lower()))
-                end_room_id = room.room_number
-
-            path = find_path_between_rooms(
-                from_room=start_room_id, to_room=end_room_id, max_depth=max_depth
-            )
-
-            if path:
-                return {"path": path, "cost": len(path)}
-            return None
-        except DoesNotExist:
-            self.logger.warning(f"Room with name or id '{end_room_identifier}' not found.")
-            return None
-        except Exception as e:
-            self.logger.error(
-                f"Error finding path from {start_room_id} to {end_room_identifier}: {e}",
-                exc_info=True,
-            )
-            return None
 
     async def query_entities_by_type(self, entity_type: str) -> list[dict[str, Any]]:
         """Query entities by type from the knowledge graph.
@@ -460,8 +425,11 @@ class GameKnowledgeGraph:
             List[Dict[str, Any]]: List of entities matching the type
         """
         if not self._initialized:
-            self.logger.error("Cannot query entities: Knowledge graph not initialized.")
-            return []
+            try:
+                await self.initialize()
+            except Exception:
+                self.logger.error("Cannot query entities: Knowledge graph not initialized.")
+                return []
 
         try:
             entities = Entity.select().where(Entity.entity_type == entity_type)
@@ -494,8 +462,11 @@ class GameKnowledgeGraph:
             List[Dict[str, Any]]: List of NPC entities in the room
         """
         if not self._initialized:
-            self.logger.error("Cannot find NPCs: Knowledge graph not initialized.")
-            return []
+            try:
+                await self.initialize()
+            except Exception:
+                self.logger.error("Cannot find NPCs: Knowledge graph not initialized.")
+                return []
 
         try:
             room = Room.select().join(Entity).where(Entity.name == room_identifier).get()
@@ -518,8 +489,11 @@ class GameKnowledgeGraph:
             Optional[Dict[str, Any]]: The room entity if found, None otherwise
         """
         if not self._initialized:
-            self.logger.error("Cannot find room with NPC: Knowledge graph not initialized.")
-            return None
+            try:
+                await self.initialize()
+            except Exception:
+                self.logger.error("Cannot find room with NPC: Knowledge graph not initialized.")
+                return None
 
         try:
             npc = NPC.select().join(Entity).where(Entity.name == npc_name).get()
@@ -531,6 +505,40 @@ class GameKnowledgeGraph:
             return None
         except Exception as e:
             self.logger.error(f"Error finding room with NPC: {e}", exc_info=True)
+            return None
+
+    async def find_path_between_rooms(
+        self, start_room_id: int, end_room_identifier: int | str, max_depth: int = 1000
+    ) -> dict[str, Any] | None:
+        if not self._initialized:
+            try:
+                await self.initialize()
+            except Exception:
+                self.logger.error("Cannot find path: Knowledge graph not initialized.")
+                return None
+
+        try:
+            if isinstance(end_room_identifier, int):
+                end_room_id = end_room_identifier
+            else:
+                try:
+                    end_room_id = int(end_room_identifier)
+                except (ValueError, TypeError):
+                    room = Room.get(fn.LOWER(Room.full_name).contains(str(end_room_identifier).lower()))
+                    end_room_id = room.room_number
+
+            path = find_path_between_rooms(from_room=start_room_id, to_room_number=end_room_id, max_depth=max_depth)
+            if path:
+                return {"path": path, "cost": len(path)}
+            return None
+        except DoesNotExist:
+            self.logger.warning(f"Room with name or id '{end_room_identifier}' not found.")
+            return None
+        except Exception as e:
+            self.logger.error(
+                f"Error finding path from {start_room_id} to {end_room_identifier}: {e}",
+                exc_info=True,
+            )
             return None
 
     async def get_knowledge_graph_summary(self) -> dict[str, Any]:

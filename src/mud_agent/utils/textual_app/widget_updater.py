@@ -6,14 +6,14 @@ state manager, and other sources.
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Dict, Any, Optional
+from typing import Any
 
-
-
-from ..widgets.vitals_static_widgets import HPStaticWidget, MPStaticWidget, MVStaticWidget
-from ..widgets.status_widgets import StatusEffectsWidget
 from ..widgets.containers import StatusContainer
-from ..widgets.mapper_container import MapperContainer
+from ..widgets.vitals_static_widgets import (
+    HPStaticWidget,
+    MPStaticWidget,
+    MVStaticWidget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class WidgetUpdater:
         except Exception as e:
             logger.error(f"Error updating vitals widgets: {e}", exc_info=True)
 
-    async def _update_hp_widget(self, char_data: Dict[str, Any]) -> None:
+    async def _update_hp_widget(self, char_data: dict[str, Any]) -> None:
         """Update HP widget with current data.
 
         Args:
@@ -113,7 +113,7 @@ class WidgetUpdater:
             if "not found" not in str(e).lower():
                 logger.error(f"HP widget error details: {e}", exc_info=True)
 
-    async def _update_mp_widget(self, char_data: Dict[str, Any]) -> None:
+    async def _update_mp_widget(self, char_data: dict[str, Any]) -> None:
         """Update MP widget with current data.
 
         Args:
@@ -150,7 +150,7 @@ class WidgetUpdater:
             if "not found" not in str(e).lower():
                 logger.error(f"MP widget error details: {e}", exc_info=True)
 
-    async def _update_mv_widget(self, char_data: Dict[str, Any]) -> None:
+    async def _update_mv_widget(self, char_data: dict[str, Any]) -> None:
         """Update MV widget with current data.
 
         Args:
@@ -255,7 +255,7 @@ class WidgetUpdater:
             if "not found" not in str(e).lower():
                 logger.error(f"Map widget error details: {e}", exc_info=True)
 
-    async def update_vitals_from_gmcp(self, gmcp_data: Dict[str, Any]) -> None:
+    async def update_vitals_from_gmcp(self, gmcp_data: dict[str, Any]) -> None:
         """Update vitals widgets directly from GMCP data.
 
         Args:
@@ -456,7 +456,7 @@ class WidgetUpdater:
         """
         return self._updating_widgets
 
-    def get_update_status(self) -> Dict[str, Any]:
+    def get_update_status(self) -> dict[str, Any]:
         """Get current update status information.
 
         Returns:

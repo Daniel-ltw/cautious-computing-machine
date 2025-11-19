@@ -5,19 +5,14 @@ including internal commands and special debug commands.
 """
 
 import asyncio
-import random
-import logging
-import re
 import collections
-from itertools import groupby
-from typing import TYPE_CHECKING
-
-
+import logging
+import random
+import re
 
 from ...mcp.game_knowledge_graph import PathfindingError
-from ...db.models import db, RoomExit
-from ..widgets.command_log import CommandLog
 from ..textual_widgets import CommandInput
+from ..widgets.command_log import CommandLog
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +101,15 @@ class CommandProcessor:
             elif command == "/ac":
                 self.auto_spellup = not self.auto_spellup
                 command_log = self.app.query_one("#command-log", CommandLog)
-                if not self.auto_spellup and not self.auto_spellup_task.done():
-                    command_log.write(f"[bold cyan]Autocast: [/bold cyan][bold red]Off[/bold red]")
-                    self.auto_spellup_task.cancel()
+                if self.auto_spellup:
+                    command_log.write("[bold cyan]Autocast: [/bold cyan][bold red]On[/bold red]")
+                    if not self.auto_spellup_task or self.auto_spellup_task.done():
+                        self.auto_spellup_task = asyncio.create_task(self.handle_autocast())
                 else:
-                    command_log.write(f"[bold cyan]Autocast: [/bold cyan][bold red]On[/bold red]")
-                    self.auto_spellup_task = asyncio.create_task(self.handle_autocast())
+                    command_log.write("[bold cyan]Autocast: [/bold cyan][bold red]Off[/bold red]")
+                    if self.auto_spellup_task and not self.auto_spellup_task.done():
+                        self.auto_spellup_task.cancel()
+                    self.auto_spellup_task = None
 
             elif command.startswith("/rf "):
                 room_name = command[4:].strip()
@@ -355,7 +353,7 @@ class CommandProcessor:
             path_info = await self.agent.knowledge_graph.find_path_between_rooms(
                 start_room_id=current_room_num,
                 end_room_identifier=room_name,
-                max_depth=500
+                max_depth=1000
             )
 
             if path_info and path_info.get("path"):
@@ -412,7 +410,7 @@ class CommandProcessor:
             }
 
             # Convert NPC names to the format expected by add_entity
-            if 'npcs' in room_data and room_data['npcs']:
+            if room_data.get('npcs'):
                 entity_data['npcs'] = [{"name": name} for name in room_data['npcs']]
 
             # If an NPC was manually added, add it to the room's NPC list
@@ -717,11 +715,10 @@ class CommandProcessor:
             if hasattr(command_input, "input"):
                 command_input.input.value = text
                 command_input.input.focus()
-            else:
-                # Fallback: try setting value directly if possible
-                if hasattr(command_input, "value"):
-                    command_input.value = text
-                    command_input.focus()
+            # Fallback: try setting value directly if possible
+            elif hasattr(command_input, "value"):
+                command_input.value = text
+                command_input.focus()
         except Exception as e:
             logger.error(f"Error pre-filling command input: {e}", exc_info=True)
 

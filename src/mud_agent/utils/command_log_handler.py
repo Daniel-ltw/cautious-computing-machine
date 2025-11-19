@@ -4,8 +4,7 @@ Logging handler that forwards error logs to the command log.
 
 import logging
 import re
-import traceback
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from ..widgets.command_log import CommandLog

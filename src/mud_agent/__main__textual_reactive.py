@@ -13,10 +13,10 @@ from rich.console import Console
 
 from .agent.mud_agent import MUDAgent
 from .config.config import Config
+from .utils.command_log_handler import CommandLogHandler
 from .utils.logging import setup_logging
 from .utils.textual_app import MUDTextualApp
 from .utils.textual_integration import TextualIntegration
-from .utils.command_log_handler import CommandLogHandler
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -33,7 +33,8 @@ async def main() -> int:
             level=config.log.level,
             format_str="%(asctime)s - %(levelname)s - %(message)s",
             log_file=config.log.file,
-            consolidate_startup=True,  # Consolidate startup logs
+            consolidate_startup=True,
+            to_console=False,
         )
 
         # Add the CommandLogHandler to the root logger
@@ -75,45 +76,29 @@ async def main() -> int:
         # Create the Textual app first so we can show the loading screen immediately
         app = MUDTextualApp(agent, agent.state_manager, agent.room_manager)
 
-        # Create a connection task that will run in the background
-        connection_task = asyncio.create_task(
-            connect_and_initialize(agent, character_name, password, config)
-        )
+        # Run the app and the connection logic concurrently
+        try:
+            # Start the connection and initialization in the background
+            init_task = asyncio.create_task(
+                connect_and_initialize(agent, character_name, password, config)
+            )
 
-        # Start the agent with context manager
-        async with agent:
-            try:
-                # Run the app - this will show the loading screen immediately
-                # while the connection happens in the background
-                logger.info("Starting Textual UI with loading screen...")
-                logger.info("About to call app.run_async()...")
-                await app.run_async()
-                logger.info("app.run_async() completed")
-            except Exception as e:
-                logger.error(f"Error running Textual app: {e}", exc_info=True)
-                return 1
+            # Run the Textual app
+            await app.run_async()
 
+            # Wait for the initialization to complete
+            receive_task = await init_task
+            if receive_task:
+                await receive_task
+
+        except Exception as e:
+            logger.error(f"An error occurred: {e}", exc_info=True)
+            return 1
+        finally:
             # Clean up
             await agent.disconnect()
 
-            # Cancel the connection task if it's still running
-            if not connection_task.done():
-                connection_task.cancel()
-                try:
-                    await connection_task
-                except asyncio.CancelledError:
-                    pass
 
-            # Cancel the receive task if it exists
-            if (
-                hasattr(agent.mud_tool.client, "receive_task")
-                and agent.mud_tool.client.receive_task
-            ):
-                agent.mud_tool.client.receive_task.cancel()
-                try:
-                    await agent.mud_tool.client.receive_task
-                except asyncio.CancelledError:
-                    pass
 
         return 0
 
@@ -163,7 +148,7 @@ async def connect_and_initialize(agent, character_name, password, config):
         # Set a flag in the agent to indicate that connection is complete
         agent.connection_complete = True
 
-        return True
+        return agent.mud_tool.client.receive_task
 
     except Exception as e:
         logger.error(f"Error in connect_and_initialize: {e}", exc_info=True)

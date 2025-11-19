@@ -97,8 +97,10 @@ startup_filter = StartupLogFilter()
 def setup_logging(
     level: str = "INFO",
     format_str: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    log_file: str | None = "mud_agent.log",
+    log_file: str | None = None,
     consolidate_startup: bool = True,
+    to_console: bool = False,
+    console_level: int | None = None,
 ) -> None:
     """Configure logging for the MUD agent.
 
@@ -128,18 +130,23 @@ def setup_logging(
     # Create formatter
     formatter = logging.Formatter(format_str)
 
-    # Create file handler if log_file is specified
+    if isinstance(log_file, str):
+        if log_file.strip().lower() in {"", "none", "false"}:
+            log_file = None
+
     if log_file:
         file_handler = logging.FileHandler(log_file, mode="a")
-        file_handler.setLevel(numeric_level)  # Use the same level for file logging
+        file_handler.setLevel(numeric_level)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
 
-    # Create console handler for ERROR and above
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.ERROR)  # Only show ERROR and CRITICAL in console
-    console_handler.setFormatter(formatter)
-    root_logger.addHandler(console_handler)
+    if to_console:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        if console_level is None:
+            console_level = logging.ERROR
+        console_handler.setLevel(console_level)
+        root_logger.addHandler(console_handler)
 
     # Set specific loggers to higher levels to reduce noise
     if level.upper() != "DEBUG":
@@ -171,7 +178,7 @@ def setup_logging(
     # Log the configuration
     logger = logging.getLogger(__name__)
     logger.debug(
-        f"Logging configured with level={level}, format={format_str}, file={log_file}"
+        f"Logging configured level={level} file={'enabled' if log_file else 'disabled'} console={'enabled' if to_console else 'disabled'}"
     )
 
     return root_logger

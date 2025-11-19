@@ -6,48 +6,31 @@ all the separated components for a clean, maintainable architecture.
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from textual import on, work
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import LoadingIndicator, Static, Input, Header, Footer
-from textual.binding import Binding
-from textual.reactive import reactive
-from textual import log
-import asyncio
-from typing import Optional, TYPE_CHECKING
+from textual.containers import Container
+from textual.widgets import Footer, Header, Static
 
 if TYPE_CHECKING:
     from mud_agent.agent import MUDAgent
-    from mud_agent.state_manager import StateManager
     from mud_agent.room_manager import RoomManager
+    from mud_agent.state_manager import StateManager
 
-from .styles import STYLES
-from .commands import CommandProcessor
-from .gmcp_manager import GMCPManager
-from .widget_updater import WidgetUpdater
-from .events import EventHandler
-from .server_comm import ServerCommunicator
-
-from ..widgets.containers import (
-    VitalsContainer,
-    NeedsContainer,
-    StatsContainer,
-    WorthContainer,
-    StatusContainer,
-    RoomInfoMapContainer,
-)
-from ..widgets.mapper_container import MapperContainer
-from ..widgets.command_log import CommandLog
-from ..textual_widgets import CommandInput
-from ..widgets.status_widgets import StatusEffectsWidget
-from ..widgets.vitals_static_widgets import (
-    HPStaticWidget,
-    MPStaticWidget,
-    MVStaticWidget,
-)
 from ...utils.command_log_handler import CommandLogHandler
+from ..textual_widgets import CommandInput
+from ..widgets.command_log import CommandLog
+from ..widgets.containers import (
+    RoomInfoMapContainer,
+    StatusContainer,
+)
+from ..widgets.status_widgets import StatusEffectsWidget
+from .commands import CommandProcessor
+from .events import EventHandler
+from .gmcp_manager import GMCPManager
+from .server_comm import ServerCommunicator
+from .styles import STYLES
+from .widget_updater import WidgetUpdater
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +77,7 @@ class MUDTextualApp(App):
         if hasattr(state_manager, '_textual_app'):
             state_manager._textual_app = self
         else:
-            setattr(state_manager, '_textual_app', self)
+            state_manager._textual_app = self
 
         # Component managers
         self.command_processor = CommandProcessor(self)
@@ -135,7 +118,7 @@ class MUDTextualApp(App):
                 with Container(id="command-container"):
                     yield CommandLog(id="command-log", highlight=True, markup=True)
                     yield CommandInput(
-                        on_submit=self._on_command_submit,
+                        self._handle_command_submit,
                         id="command-input",
                         placeholder="Enter command..."
                     )
@@ -157,30 +140,48 @@ class MUDTextualApp(App):
     async def on_mount(self) -> None:
         """Handle the mount event."""
         try:
-            logger.info("App mounted, starting initialization")
+            logger.info("App mounted, command log handler set up.")
 
             # Set the command log for the handler
             command_log = self.query_one(CommandLog)
             command_log_handler = CommandLogHandler()
             command_log_handler.set_command_log(command_log)
 
-            # Start initialization with loading screen
-            await self._initialize_with_loading_screen()
-
         except Exception as e:
             logger.error(f"Error during mount: {e}", exc_info=True)
+
+    async def on_ready(self) -> None:
+        """Called when the app is ready to run."""
+        try:
+            await self._initialize_with_loading_screen()
+        except Exception as e:
+            logger.error(f"Initialization failed in on_ready: {e}", exc_info=True)
             await self._handle_initialization_error(e)
 
     async def _initialize_with_loading_screen(self) -> None:
         """Initialize the application with a loading screen."""
         try:
-            # Show loading screen
-            loading_overlay = self.query_one("#loading-overlay")
-            loading_overlay.display = True
+            loading_overlay = None
+            loading_indicator = None
+            loading_text = None
 
-            # Start loading indicator
-            loading_indicator = self.query_one("#loading-indicator", Static)
-            loading_text = self.query_one("#loading-text", Static)
+            try:
+                loading_overlay = self.query_one("#loading-overlay")
+                loading_indicator = self.query_one("#loading-indicator", Static)
+                loading_text = self.query_one("#loading-text", Static)
+            except Exception:
+                try:
+                    loading_overlay = Container(id="loading-overlay", classes="loading-overlay")
+                    loading_indicator = Static("●", id="loading-indicator")
+                    loading_text = Static("Loading...", id="loading-text")
+                    await self.mount(loading_overlay)
+                    await loading_overlay.mount(loading_indicator)
+                    await loading_overlay.mount(loading_text)
+                except Exception as mount_err:
+                    logger.warning(f"Unable to create loading overlay: {mount_err}")
+
+            if loading_overlay:
+                loading_overlay.display = True
 
             # Update loading text and perform initialization steps
             steps = [
@@ -194,12 +195,19 @@ class MUDTextualApp(App):
             ]
 
             for step_text, step_func in steps:
-                loading_text.update(step_text)
-                await asyncio.sleep(0.1)  # Brief pause for visual feedback
-                await step_func()
+                try:
+                    if loading_text:
+                        loading_text.update(step_text)
+                    await asyncio.sleep(0.1)
+                    result = step_func()
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as step_err:
+                    logger.error(f"Initialization step failed: {step_text}: {step_err}", exc_info=True)
+                    raise
 
-            # Hide loading screen
-            loading_overlay.display = False
+            if loading_overlay:
+                loading_overlay.display = False
             self._loading = False
             self._initialized = True
 
@@ -213,29 +221,44 @@ class MUDTextualApp(App):
         """Register the app and widgets with the integration."""
         try:
             if hasattr(self.agent, "integration"):
-                # Register the app
                 self.agent.integration.register_app(self)
 
-                # Register widgets
-                widgets_to_register = [
-                    ("hp-widget", HPStaticWidget),
-                    ("mp-widget", MPStaticWidget),
-                    ("mv-widget", MVStaticWidget),
-                    ("status-widget", StatusEffectsWidget),
-                    ("room-map", RoomMapWidget),
-                    ("command-log", CommandLog),
-                    ("command-input", CommandInput),
-                ]
+                status_widget = None
+                map_widget = None
+                command_log = None
 
-                for widget_id, widget_class in widgets_to_register:
+                try:
+                    status_widget = self.query_one("#status-widget", StatusContainer)
+                    self._widgets["status-widget"] = status_widget
+                except Exception as e:
+                    logger.warning(f"Could not find status widget: {e}")
+
+                try:
+                    map_widget = self.query_one("#room-info-map-container", RoomInfoMapContainer)
+                    self._widgets["room-info-map-container"] = map_widget
+                except Exception as e:
+                    logger.warning(f"Could not find map widget: {e}")
+
+                try:
+                    command_log = self.query_one("#command-log", CommandLog)
+                    self._widgets["command-log"] = command_log
+                except Exception as e:
+                    logger.warning(f"Could not find command log: {e}")
+
+                if status_widget and map_widget and command_log:
                     try:
-                        widget = self.query_one(f"#{widget_id}", widget_class)
-                        self.agent.integration.register_widget(widget_id, widget)
-                        self._widgets[widget_id] = widget
+                        self.agent.integration.register_widgets(status_widget, map_widget, command_log)
+                        logger.info("Registered widgets with integration")
                     except Exception as e:
-                        logger.warning(f"Could not register widget {widget_id}: {e}")
+                        logger.warning(f"Integration registration failed: {e}")
 
-                logger.info("Registration with integration complete")
+                try:
+                    effects = self.query_one("#status-effects-widget", StatusEffectsWidget)
+                    if hasattr(effects, "register_with_state_manager"):
+                        effects.register_with_state_manager(self.state_manager)
+                        self._widgets["status-effects-widget"] = effects
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.error(f"Error registering with integration: {e}", exc_info=True)
@@ -256,6 +279,13 @@ class MUDTextualApp(App):
             # Set default values for widgets
             await self.widget_updater.set_default_widget_values()
 
+            try:
+                for node in self.query("*"):
+                    if hasattr(node, "register_with_state_manager"):
+                        node.register_with_state_manager(self.state_manager)
+            except Exception as e:
+                logger.debug(f"Bulk widget registration skipped: {e}")
+
             # Start GMCP polling
             await self.gmcp_manager.start_gmcp_polling()
 
@@ -271,6 +301,17 @@ class MUDTextualApp(App):
         except Exception as e:
             logger.error(f"Error finishing initialization: {e}", exc_info=True)
 
+    def _handle_command_submit(self, command: str) -> None:
+        try:
+            import asyncio
+            asyncio.create_task(self.command_processor.submit_command(command))
+        except Exception as e:
+            try:
+                log = self.query_one("#command-log", CommandLog)
+                log.write(f"[bold red]Error submitting command: {e}[/bold red]")
+            except Exception:
+                pass
+
     async def _handle_initialization_error(self, error: Exception) -> None:
         """Handle initialization errors.
 
@@ -278,9 +319,11 @@ class MUDTextualApp(App):
             error: The error that occurred
         """
         try:
-            # Hide loading screen
-            loading_overlay = self.query_one("#loading-overlay")
-            loading_overlay.display = False
+            try:
+                loading_overlay = self.query_one("#loading-overlay")
+                loading_overlay.display = False
+            except Exception:
+                pass
 
             # Show error message
             error_msg = f"Initialization failed: {error}"
@@ -291,7 +334,6 @@ class MUDTextualApp(App):
                 command_log = self.query_one("#command-log", CommandLog)
                 command_log.write(f"[bold red]{error_msg}[/bold red]")
             except Exception:
-                # If command log is not available, create a simple error display
                 try:
                     error_display = Static(error_msg, id="init-error")
                     await self.mount(error_display)
@@ -301,25 +343,10 @@ class MUDTextualApp(App):
         except Exception as e:
             logger.error(f"Error handling initialization error: {e}", exc_info=True)
 
-    def _on_command_submit(self, command: str) -> None:
-        """Handle command submission from CommandInput.
 
-        Args:
-            command: The command string to submit
-        """
-        # This will be called by the CommandInput widget
-        # The actual command processing will be handled by the event system
-        pass
 
-    # Event handlers
-    @on(CommandInput.Submitted)
-    async def on_command_submitted(self, event: CommandInput.Submitted) -> None:
-        """Handle command submission.
-
-        Args:
-            event: The command submission event
-        """
-        await self.command_processor.submit_command(event.value)
+    # Event handler removed; command submission is routed exclusively via
+    # the CommandInput callback `_handle_command_submit` to prevent duplicates.
 
     # Action handlers
     async def action_quit(self) -> None:
@@ -349,7 +376,7 @@ class MUDTextualApp(App):
         await self.command_processor.handle_help_command()
 
     # Public API methods
-    def get_widget(self, widget_id: str) -> Optional[Any]:
+    def get_widget(self, widget_id: str) -> Any | None:
         """Get a widget by ID.
 
         Args:

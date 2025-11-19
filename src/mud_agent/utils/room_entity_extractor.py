@@ -1,7 +1,7 @@
 import logging
-from peewee import fn
-from mud_agent.db.models import Room, RoomExit, NPC, db
-from mud_agent.utils.retrievers import get_retriever
+
+from ..db.models import Room, db
+
 
 def extract_rooms_from_db(limit: int = 10) -> list[Room]:
     """

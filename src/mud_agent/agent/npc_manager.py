@@ -201,10 +201,16 @@ class NPCManager:
             room_identifier = (
                 str(self.agent.state_manager.room_num)
                 if hasattr(self.agent, 'state_manager') and self.agent.state_manager.room_num != 0
-                else self.agent.room_manager.current_room
+                else (
+                    self.agent.room_manager.current_room
+                    if isinstance(self.agent.room_manager.current_room, str)
+                    else (
+                        (self.agent.room_manager.current_room or {}).get("name", "")
+                    )
+                )
             )
             npcs_in_current_room = (
-                await self.agent.knowledge_graph_manager.find_npcs_in_room(
+                await self.agent.knowledge_graph.find_npcs_in_room(
                     room_identifier
                 )
             )

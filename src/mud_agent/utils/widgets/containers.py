@@ -10,8 +10,6 @@ import logging
 from rich.console import Console
 from textual.containers import Container, Horizontal, ScrollableContainer
 
-from .mapper_container import MapperContainer
-
 from .base import (
     FULL_THRESHOLD,
     HUNGRY_THRESHOLD,
@@ -20,6 +18,7 @@ from .base import (
     ZERO,
 )
 from .character_widgets import CharacterHeaderWidget
+from .mapper_container import MapperContainer
 from .needs_widgets import HungerWidget, ThirstWidget
 from .room_widgets import RoomWidget
 from .stats_static_widgets import (
@@ -492,7 +491,6 @@ class StatusContainer(Container):
 
     async def _deferred_update(self, state_manager):
         """Deferred update that waits before retrying."""
-        import asyncio
         await asyncio.sleep(0.1)  # Wait 100ms before retrying
         await self.update_from_state_manager(state_manager)
 
@@ -2494,7 +2492,7 @@ class RoomInfoMapContainer(ScrollableContainer):
     DEFAULT_CSS = """
     RoomInfoMapContainer {
         layout: vertical;
-        width: 100%;
+        width: auto;
         height: auto;
         margin: 0;
         padding: 0;
@@ -2523,18 +2521,19 @@ class RoomInfoMapContainer(ScrollableContainer):
     }
 
     #mapper-container {
-        height: 1fr;
+        width: auto;
+        height: auto;
         border: round $primary;
     }
 
-    #z-0 #z-1 #z-2 {
+    #map-grid-z0, #map-grid-z1, #map-grid-z2 {
         layout: grid;
-        grid-size: 7 11;
-        grid-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
-        grid-rows: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
-        width: 100%;
-        height: 33;
-        min-height: 33;
+        grid-size: 9 11;
+        grid-columns: 5 5 5 5 5 5 5 5 5 5 5;
+        grid-rows: 3 3 3 3 3 3 3 3 3;
+        width: auto;
+        height: auto;
+        min-height: 27;
         padding: 0;
         margin: 0;
         background: $surface-darken-2;

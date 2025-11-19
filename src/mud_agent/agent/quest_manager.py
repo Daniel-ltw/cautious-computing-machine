@@ -68,7 +68,7 @@ class QuestManager:
             if not self.questor_room:
                 # Try to find the questor in the knowledge graph
                 questor_room = (
-                    await self.agent.knowledge_graph_manager.find_room_with_npc(
+                    await self.agent.knowledge_graph.find_room_with_npc(
                         self.questor_name
                     )
                 )
@@ -78,16 +78,18 @@ class QuestManager:
 
             # If we know the questor's room, navigate there
             if self.questor_room:
-                path = await self.agent.knowledge_graph_manager.find_path_between_rooms(
-                    self.agent.room_manager.current_room, self.questor_room
+                path_info = await self.agent.knowledge_graph.find_path_between_rooms(
+                    start_room_id=self.agent.state_manager.room_num,
+                    end_room_identifier=self.questor_room
                 )
 
-                if not path:
+                if not path_info or not path_info.get("path"):
                     self.logger.warning(
                         f"Could not find path to questor room '{self.questor_room}'"
                     )
                     return False
 
+                path = path_info["path"]
                 self.logger.info(f"Found path to questor: {path}")
 
                 # Navigate to the questor's room
@@ -132,10 +134,16 @@ class QuestManager:
                 room_identifier = (
                     str(self.agent.state_manager.room_num)
                     if hasattr(self.agent, 'state_manager') and self.agent.state_manager.room_num != 0
-                    else self.agent.room_manager.current_room
+                    else (
+                        self.agent.room_manager.current_room
+                        if isinstance(self.agent.room_manager.current_room, str)
+                        else (
+                            (self.agent.room_manager.current_room or {}).get("name", "")
+                        )
+                    )
                 )
                 npcs_in_room = (
-                    await self.agent.knowledge_graph_manager.find_npcs_in_room(
+                    await self.agent.knowledge_graph.find_npcs_in_room(
                         room_identifier
                     )
                 )
@@ -174,9 +182,15 @@ class QuestManager:
             room_identifier = (
                 str(self.agent.state_manager.room_num)
                 if hasattr(self.agent, 'state_manager') and self.agent.state_manager.room_num != 0
-                else self.agent.room_manager.current_room
+                else (
+                    self.agent.room_manager.current_room
+                    if isinstance(self.agent.room_manager.current_room, str)
+                    else (
+                        (self.agent.room_manager.current_room or {}).get("name", "")
+                    )
+                )
             )
-            npcs_in_room = await self.agent.knowledge_graph_manager.find_npcs_in_room(
+            npcs_in_room = await self.agent.knowledge_graph.find_npcs_in_room(
                 room_identifier
             )
             questor_present = False

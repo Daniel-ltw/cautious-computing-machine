@@ -142,10 +142,10 @@ class BaseStatStaticWidget(StateListener, BaseWidget):
     def _on_maxstats_update(self, updates: dict[str, Any]) -> None:
         """Handle a maxstats update event."""
         logger.debug(f"{self.__class__.__name__} handling maxstats update: {updates}")
-        stat_name_lower = f"{self.stat_name.lower()}_value"
+        stat_name_lower = f"{self.stat_name.lower()}_max"
         if stat_name_lower in updates:
             self.max_value = updates[stat_name_lower]
-            self.update_display()
+        self.update_display()
 
 
 class StrStaticWidget(BaseStatStaticWidget):

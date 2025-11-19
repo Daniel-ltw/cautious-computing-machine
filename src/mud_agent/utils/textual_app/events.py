@@ -6,13 +6,12 @@ updates for the application.
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .core import MUDTextualApp
 
-from textual.events import Mount
-from textual.events import Event
+from textual.events import Event, Mount
 from textual.message import Message
 
 logger = logging.getLogger(__name__)
@@ -187,7 +186,7 @@ class EventHandler:
         except Exception as e:
             logger.error(f"Error handling knowledge graph queue size change: {e}", exc_info=True)
 
-    async def on_room_changed(self, room_data: Dict[str, Any]) -> None:
+    async def on_room_changed(self, room_data: dict[str, Any]) -> None:
         """Handle room changes.
 
         Args:
@@ -207,7 +206,7 @@ class EventHandler:
         except Exception as e:
             logger.error(f"Error handling room change: {e}", exc_info=True)
 
-    async def on_vitals_changed(self, vitals_data: Dict[str, Any]) -> None:
+    async def on_vitals_changed(self, vitals_data: dict[str, Any]) -> None:
         """Handle vitals changes.
 
         Args:
@@ -223,7 +222,7 @@ class EventHandler:
         except Exception as e:
             logger.error(f"Error handling vitals change: {e}", exc_info=True)
 
-    async def on_character_data_changed(self, char_data: Dict[str, Any]) -> None:
+    async def on_character_data_changed(self, char_data: dict[str, Any]) -> None:
         """Handle character data changes.
 
         Args:
@@ -363,7 +362,7 @@ class EventHandler:
                     # Process the event based on its type
                     await self._handle_queued_event(event_type, event_data)
 
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     break
                 except Exception as e:
                     logger.error(f"Error processing queued event: {e}", exc_info=True)
@@ -468,7 +467,7 @@ class CombatStatusChanged(AppMessage):
 class RoomChanged(AppMessage):
     """Message sent when the current room changes."""
 
-    def __init__(self, room_data: Dict[str, Any]) -> None:
+    def __init__(self, room_data: dict[str, Any]) -> None:
         super().__init__()
         self.room_data = room_data
 
@@ -476,7 +475,7 @@ class RoomChanged(AppMessage):
 class VitalsChanged(AppMessage):
     """Message sent when character vitals change."""
 
-    def __init__(self, vitals_data: Dict[str, Any]) -> None:
+    def __init__(self, vitals_data: dict[str, Any]) -> None:
         super().__init__()
         self.vitals_data = vitals_data
 

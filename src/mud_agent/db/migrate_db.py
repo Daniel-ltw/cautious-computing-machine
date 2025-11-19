@@ -6,14 +6,9 @@ This script provides an easy way to initialize and migrate the SQLite database.
 """
 
 import sys
-import os
 from pathlib import Path
 
-# Add the project root to the Python path
-project_root = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(project_root))
-
-from mud_agent.mcp.migrations import init_database, MigrationManager
+from ..mcp.migrations import MigrationManager, init_database
 
 
 class DatabaseMigrator:
@@ -92,11 +87,11 @@ def main():
             print("\n✓ Database initialized successfully!")
             print(f"\nDatabase created at: {db_path}")
             print("\nYou can now use the Peewee models to interact with the knowledge graph.")
-            
+
             # Show final status
             print("\nFinal migration status:")
             manager.status()
-            
+
         except Exception as e:
             print(f"\n✗ Error initializing database: {e}")
             sys.exit(1)

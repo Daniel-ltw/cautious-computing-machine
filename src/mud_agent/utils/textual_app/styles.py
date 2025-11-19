@@ -4,7 +4,6 @@ This module contains all CSS styling definitions, layout constants,
 and visual appearance configurations for the textual interface.
 """
 
-from textual.app import App
 
 
 # Main CSS for the application
@@ -42,20 +41,20 @@ Header {
     height: 20fr;
 }
 
-/* Map container - 40% width like original */
+/* Map container - fit to content */
 #map-container {
-    width: 40%;
+    width: auto;
     height: 100%;
     border-right: solid #3b82f6;
     overflow-y: auto;
     background: #1e293b;
 }
 
-/* Command container - 60% width like original */
+/* Command container - take remaining space */
 #command-container {
-    width: 60%;
+    width: 1fr;
     height: 100%;
-    margin-left: 1;
+    margin-left: 0;
 }
 
 #command-log {
@@ -379,24 +378,24 @@ Header {
 
 class LayoutConstants:
     """Constants for layout dimensions and spacing."""
-    
+
     # Grid dimensions
     GRID_ROWS = 3
     GRID_COLUMNS = 3
     GRID_GUTTER = 1
-    
+
     # Component heights
     HEADER_HEIGHT = 3
     FOOTER_HEIGHT = 3
     COMMAND_INPUT_HEIGHT = 3
     VITALS_WIDGET_HEIGHT = 3
     STATS_WIDGET_HEIGHT = 3
-    
+
     # Spacing
     DEFAULT_MARGIN = 1
     DEFAULT_PADDING = 1
     WIDGET_SPACING = 1
-    
+
     # Responsive breakpoints
     MOBILE_BREAKPOINT = 80
 
@@ -417,23 +416,23 @@ LAYOUT_CONFIG = {
 
 class ColorScheme:
     """Color scheme definitions for the application."""
-    
+
     # Primary colors
     PRIMARY = "#3b82f6"
     SECONDARY = "#64748b"
     ACCENT = "#10b981"
-    
+
     # Status colors
     SUCCESS = "#22c55e"
     WARNING = "#f59e0b"
     ERROR = "#ef4444"
     INFO = "#06b6d4"
-    
+
     # Background colors
     BACKGROUND = "#0f172a"
     SURFACE = "#1e293b"
     TEXT = "#f1f5f9"
-    
+
     # Vitals colors
     HEALTH_COLOR = ERROR
     MANA_COLOR = INFO

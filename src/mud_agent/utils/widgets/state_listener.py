@@ -7,12 +7,10 @@ This module provides a base widget that listens for state events and updates acc
 import logging
 from typing import Any
 
-from textual.widget import Widget
-
 logger = logging.getLogger(__name__)
 
 
-class StateListener(Widget):
+class StateListener:
     """Base widget that listens for state events.
 
     This widget provides a base class for widgets that need to listen for state events.
@@ -20,281 +18,127 @@ class StateListener(Widget):
     of state events.
     """
 
-    def on_mount(self) -> None:
-        """Called when the widget is mounted.
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.subscribed_keys = set()
+        self.state_manager = None
 
-        This method registers for state events from the state manager.
-        """
+    def subscribe_to_state(self, state_key: str) -> None:
+        """Subscribes to a state key."""
+        self.subscribed_keys.add(state_key)
 
-        # Register for state events if the app and state manager are available
-        if hasattr(self, "app"):
-            # Try to find the state manager in different places
-            state_manager = None
+    def unsubscribe_from_state(self, state_key: str) -> None:
+        """Unsubscribes from a state key."""
+        self.subscribed_keys.discard(state_key)
 
-            # First check if it's directly in the app
-            if hasattr(self.app, "state_manager"):
-                state_manager = self.app.state_manager
-                logger.debug(f"{self.__class__.__name__} found state_manager in app")
+    def clear_subscriptions(self) -> None:
+        """Clears all state subscriptions."""
+        self.subscribed_keys.clear()
 
-            # Then check if it's in the agent
-            elif hasattr(self.app, "agent") and hasattr(
-                self.app.agent, "state_manager"
-            ):
-                state_manager = self.app.agent.state_manager
-                logger.debug(
-                    f"{self.__class__.__name__} found state_manager in app.agent"
-                )
+    def on_state_update(self, state_key: str, data: Any) -> None:
+        """Handle state updates synchronously with async compatibility."""
+        if state_key in self.subscribed_keys:
+            update = getattr(self, "update_display", None)
+            if update:
+                try:
+                    import asyncio
+                    if asyncio.iscoroutinefunction(update):
+                        try:
+                            asyncio.get_running_loop()
+                            import contextlib
+                            _task = asyncio.create_task(update(data))
+                            with contextlib.suppress(Exception):
+                                self._update_task = _task
+                        except RuntimeError:
+                            pass
+                    else:
+                        update(data)
+                except Exception:
+                    pass
 
-            # If we found a state manager, register for events
-            if state_manager and hasattr(state_manager, "events"):
-                # Register for state events
-                self._register_state_events(state_manager)
-                logger.debug(f"{self.__class__.__name__} registered for state events")
-            else:
-                logger.warning(
-                    f"{self.__class__.__name__}: State manager not found or does not have events property"
-                )
-        else:
-            logger.warning(f"{self.__class__.__name__}: App not available")
+    async def on_state_update_async(self, state_key: str, data: Any) -> None:
+        """Async variant for tests and async listeners."""
+        if state_key in self.subscribed_keys:
+            await self.update_display(data)
 
-    def _register_state_events(self, state_manager) -> None:
-        """Register for state events.
+    def get_state_data(self, state_key: str) -> Any:
+        """Gets the current state data for a key."""
+        if self.state_manager:
+            return self.state_manager.get_state(state_key)
+        return None
 
-        This method registers for state events from the state manager.
-        Override this method in subclasses to register for specific events.
+    def register_with_state_manager(self, state_manager: Any | None = None) -> None:
+        """Register the widget with the state manager."""
+        if state_manager is not None:
+            self.state_manager = state_manager
+        if self.state_manager:
+            self.state_manager.register_listener(self.id, self.on_state_update)
+            try:
+                events = getattr(self.state_manager, "events", None)
+                if events:
+                    if hasattr(self, "_on_state_update"):
+                        events.on("state_update", lambda updates: self._on_state_update(updates))
+                    if hasattr(self, "_on_room_update") or getattr(self, "register_for_room_events", False):
+                        events.on(
+                            "room_update",
+                            lambda *args, **kwargs: self._dispatch_room_update(*args, **kwargs),
+                        )
+                    if getattr(self, "register_for_worth_events", False) and hasattr(self, "_on_worth_update"):
+                        events.on("worth_update", lambda updates: self._on_worth_update(updates))
+                    if getattr(self, "register_for_stats_events", False) and hasattr(self, "_on_stats_update"):
+                        events.on("stats_update", lambda updates: self._on_stats_update(updates))
+                    if getattr(self, "register_for_maxstats_events", False) and hasattr(self, "_on_maxstats_update"):
+                        events.on("maxstats_update", lambda updates: self._on_maxstats_update(updates))
+                    if getattr(self, "register_for_status_events", False):
+                        events.on(
+                            "status_update",
+                            lambda payload: self.on_state_update("status_effects", payload.get("status_effects", payload)),
+                        )
+                    if getattr(self, "register_for_needs_events", False) and hasattr(self, "_on_needs_update"):
+                        events.on("needs_update", lambda updates: self._on_needs_update(updates))
+            except Exception:
+                pass
 
-        Args:
-            state_manager: The state manager to register with
-        """
-        # Register for general state update event
-        state_manager.events.on("state_update", self._on_state_update)
+    def unregister_from_state_manager(self) -> None:
+        """Unregisters the widget from the state manager."""
+        if self.state_manager:
+            self.state_manager.unregister_listener(self.id)
 
-        # Register for specific state events based on the widget type
-        if (
-            hasattr(self, "register_for_character_events")
-            and self.register_for_character_events
-        ):
-            state_manager.events.on("character_update", self._on_character_update)
-            # Also register with character component if available
-            if hasattr(state_manager, "character") and hasattr(
-                state_manager.character, "events"
-            ):
-                state_manager.character.events.on(
-                    "character_update", self._on_character_update
-                )
+    def is_subscribed_to(self, state_key: str) -> bool:
+        """Checks if the widget is subscribed to a state key."""
+        return state_key in self.subscribed_keys
 
-        if (
-            hasattr(self, "register_for_vitals_events")
-            and self.register_for_vitals_events
-        ):
-            state_manager.events.on("vitals_update", self._on_vitals_update)
-            # Also register with character component if available
-            if hasattr(state_manager, "character") and hasattr(
-                state_manager.character, "events"
-            ):
-                state_manager.character.events.on(
-                    "vitals_update", self._on_vitals_update
-                )
+    def get_subscribed_keys(self) -> list[str]:
+        """Gets the list of subscribed keys."""
+        return list(self.subscribed_keys)
 
-        if (
-            hasattr(self, "register_for_stats_events")
-            and self.register_for_stats_events
-        ):
-            state_manager.events.on("stats_update", self._on_stats_update)
-            # Also register with character component if available
-            if hasattr(state_manager, "character") and hasattr(
-                state_manager.character, "events"
-            ):
-                state_manager.character.events.on("stats_update", self._on_stats_update)
 
-        if (
-            hasattr(self, "register_for_maxstats_events")
-            and self.register_for_maxstats_events
-        ):
-            state_manager.events.on("maxstats_update", self._on_maxstats_update)
-            # Also register with character component if available
-            if hasattr(state_manager, "character") and hasattr(
-                state_manager.character, "events"
-            ):
-                state_manager.character.events.on(
-                    "maxstats_update", self._on_maxstats_update
-                )
 
-        if (
-            hasattr(self, "register_for_worth_events")
-            and self.register_for_worth_events
-        ):
-            state_manager.events.on("worth_update", self._on_worth_update)
-            # Also register with character component if available
-            if hasattr(state_manager, "character") and hasattr(
-                state_manager.character, "events"
-            ):
-                state_manager.character.events.on("worth_update", self._on_worth_update)
 
-        if hasattr(self, "register_for_room_events") and self.register_for_room_events:
-            logger.debug(f"{self.__class__.__name__} registering for room_update events")
-            state_manager.events.on("room_update", self._on_room_update)
-            # Also register with room component if available
-            if hasattr(state_manager, "room") and hasattr(state_manager.room, "events"):
-                state_manager.room.events.on("room_update", self._on_room_update)
-                logger.debug(f"{self.__class__.__name__} also registered with room component events")
-            logger.debug(f"{self.__class__.__name__} room event registration completed")
 
-        if hasattr(self, "register_for_map_events") and self.register_for_map_events:
-            state_manager.events.on("map_update", self._on_map_update)
-            # Also register with room component if available
-            if hasattr(state_manager, "room") and hasattr(state_manager.room, "events"):
-                state_manager.room.events.on("map_update", self._on_map_update)
 
-        # Quest events removed
 
-        if (
-            hasattr(self, "register_for_status_events")
-            and self.register_for_status_events
-        ):
-            state_manager.events.on("status_update", self._on_status_update)
-            # Also register with character component if available
-            if hasattr(state_manager, "character") and hasattr(
-                state_manager.character, "events"
-            ):
-                state_manager.character.events.on(
-                    "status_update", self._on_status_update
-                )
+    def update_display(self, data: Any) -> None:
+        """Updates the display with the new data.
 
-        if (
-            hasattr(self, "register_for_combat_events")
-            and self.register_for_combat_events
-        ):
-            state_manager.events.on("combat_update", self._on_combat_update)
-            # Also register with character component if available
-            if hasattr(state_manager, "character") and hasattr(
-                state_manager.character, "events"
-            ):
-                state_manager.character.events.on(
-                    "combat_update", self._on_combat_update
-                )
-
-        if (
-            hasattr(self, "register_for_needs_events")
-            and self.register_for_needs_events
-        ):
-            state_manager.events.on("needs_update", self._on_needs_update)
-            # Also register with character component if available
-            if hasattr(state_manager, "character") and hasattr(
-                state_manager.character, "events"
-            ):
-                state_manager.character.events.on("needs_update", self._on_needs_update)
-
-    def _on_state_update(self, updates: dict[str, Any]) -> None:
-        """Handle a general state update event.
+        This method should be implemented by subclasses to update the display
+        with the new data.
 
         Args:
-            updates: Dictionary of updates
+            data: The new data
         """
-        # Default implementation does nothing
-        # Override this method in subclasses to handle state updates
-        pass
+        raise NotImplementedError("update_display must be implemented by subclasses")
 
-    def _on_character_update(self, updates: dict[str, Any]) -> None:
-        """Handle a character update event.
-
-        Args:
-            updates: Dictionary of character updates
-        """
-        # Default implementation does nothing
-        # Override this method in subclasses to handle character updates
-        pass
-
-    def _on_vitals_update(self, updates: dict[str, Any]) -> None:
-        """Handle a vitals update event.
-
-        Args:
-            updates: Dictionary of vitals updates
-        """
-        # Default implementation does nothing
-        # Override this method in subclasses to handle vitals updates
-        pass
-
-    def _on_stats_update(self, updates: dict[str, Any]) -> None:
-        """Handle a stats update event.
-
-        Args:
-            updates: Dictionary of stats updates
-        """
-        logger.info(f"{self.__class__.__name__} received stats update: {updates}")
-        # Default implementation does nothing
-        # Override this method in subclasses to handle stats updates
-        pass
-
-    def _on_maxstats_update(self, updates: dict[str, Any]) -> None:
-        """Handle a maxstats update event.
-
-        Args:
-            updates: Dictionary of maxstats updates
-        """
-        logger.info(f"{self.__class__.__name__} received maxstats update: {updates}")
-        # Default implementation does nothing
-        # Override this method in subclasses to handle maxstats updates
-        pass
-
-    def _on_worth_update(self, updates: dict[str, Any]) -> None:
-        """Handle a worth update event.
-
-        Args:
-            updates: Dictionary of worth updates
-        """
-        # Default implementation does nothing
-        # Override this method in subclasses to handle worth updates
-        pass
-
-    def _on_room_update(self, updates: dict[str, Any]) -> None:
-        """Handle a room update event.
-
-        Args:
-            updates: Dictionary of room updates
-        """
-        # Default implementation does nothing
-        # Override this method in subclasses to handle room updates
-        pass
-
-    def _on_map_update(self, map_data: str) -> None:
-        """Handle a map update event.
-
-        Args:
-            map_data: Map data
-        """
-        # Default implementation does nothing
-        # Override this method in subclasses to handle map updates
-        pass
-
-    # Quest update method removed
-
-    def _on_status_update(self, updates: dict[str, Any]) -> None:
-        """Handle a status update event.
-
-        Args:
-            updates: Dictionary of status updates
-        """
-        # Default implementation does nothing
-        # Override this method in subclasses to handle status updates
-        pass
-
-    def _on_combat_update(self, in_combat: bool) -> None:
-        """Handle a combat update event.
-
-        Args:
-            in_combat: Whether the character is in combat
-        """
-        # Default implementation does nothing
-        # Override this method in subclasses to handle combat updates
-        pass
-
-    def _on_needs_update(self, updates: dict[str, Any]) -> None:
-        """Handle a needs update event.
-
-        Args:
-            updates: Dictionary of needs updates
-        """
-        # Default implementation does nothing
-        # Override this method in subclasses to handle needs updates
-        pass
+    def _dispatch_room_update(self, *args: Any, **kwargs: Any) -> None:
+        handler = getattr(self, "_on_room_update", None)
+        if not handler:
+            return
+        room_data = None
+        if "room_data" in kwargs:
+            room_data = kwargs["room_data"]
+        elif args and isinstance(args[0], dict):
+            room_data = args[0]
+        elif kwargs:
+            room_data = kwargs
+        if room_data is not None:
+            handler(room_data=room_data)

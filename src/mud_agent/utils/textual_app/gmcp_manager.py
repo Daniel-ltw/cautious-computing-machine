@@ -8,11 +8,9 @@ import asyncio
 import json
 import logging
 import threading
-from typing import TYPE_CHECKING, Dict, Any, Optional
+from typing import Any
 
-from ...mcp.game_knowledge_graph import GameKnowledgeGraph
-from ...db.models import Room, RoomExit, NPC, db
-
+from ...db.models import Room
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +25,7 @@ class GMCPManager:
         self.logger = logger
 
         # GMCP polling state
-        self._gmcp_polling_task: Optional[asyncio.Task] = None
+        self._gmcp_polling_task: asyncio.Task | None = None
         self._gmcp_polling_enabled = False
         self._gmcp_poll_interval = 5.0  # Default 5 seconds
         self._in_combat = False
@@ -238,7 +236,7 @@ class GMCPManager:
             if hasattr(self.app, '_on_combat_status_changed'):
                 await self.app._on_combat_status_changed(in_combat)
 
-    async def process_gmcp_update(self, gmcp_data: Dict[str, Any]) -> None:
+    async def process_gmcp_update(self, gmcp_data: dict[str, Any]) -> None:
         """Process a GMCP update and queue widget updates.
 
         Args:
@@ -264,7 +262,7 @@ class GMCPManager:
         except Exception as e:
             logger.error(f"Error processing GMCP update: {e}", exc_info=True)
 
-    async def _update_state_manager_from_gmcp(self, updates: Dict[str, Any]) -> None:
+    async def _update_state_manager_from_gmcp(self, updates: dict[str, Any]) -> None:
         """Update the state manager with GMCP data.
 
         Args:
@@ -306,7 +304,7 @@ class GMCPManager:
 
     # Removed request_gmcp_data method - relying on automatic server pushes
 
-    def get_character_data(self) -> Dict[str, Any]:
+    def get_character_data(self) -> dict[str, Any]:
         """Get current character data from GMCP.
 
         Returns:
@@ -320,7 +318,7 @@ class GMCPManager:
             logger.error(f"Error getting character data: {e}", exc_info=True)
             return {}
 
-    def get_room_data(self) -> Dict[str, Any]:
+    def get_room_data(self) -> dict[str, Any]:
         """Get current room data from GMCP.
 
         Returns:
@@ -342,7 +340,7 @@ class GMCPManager:
         """
         return self._gmcp_polling_enabled
 
-    def get_polling_status(self) -> Dict[str, Any]:
+    def get_polling_status(self) -> dict[str, Any]:
         """Get current polling status information.
 
         Returns:
@@ -355,7 +353,7 @@ class GMCPManager:
             'task_running': self._gmcp_polling_task is not None and not self._gmcp_polling_task.done()
         }
 
-    def handle_gmcp_package(self, package: str, data: Dict[str, Any]) -> None:
+    def handle_gmcp_package(self, package: str, data: dict[str, Any]) -> None:
         """Handle incoming GMCP packages and update the state manager.
 
         Args:
@@ -383,7 +381,7 @@ class GMCPManager:
         except Exception as e:
             self.logger.error(f"Error handling GMCP package {package}: {e}", exc_info=True)
 
-    def _handle_room_info(self, data: Dict[str, Any]) -> None:
+    def _handle_room_info(self, data: dict[str, Any]) -> None:
         """Handle room.info GMCP data and update state manager.
 
         Args:
@@ -432,14 +430,14 @@ class GMCPManager:
                 self.state_manager.events.emit("room_update", room_data=data)
             else:
                 self.app.call_from_thread(self.state_manager.events.emit, "room_update", room_data=data)
-            self.logger.debug(f"[FREEZE_DEBUG] GMCPManager room_update event emitted successfully")
+            self.logger.debug("[FREEZE_DEBUG] GMCPManager room_update event emitted successfully")
 
             self.logger.debug(f"Updated state manager from room.info: room {data.get('num', 'unknown')} - {data.get('brief', 'unknown')}")
 
         except Exception as e:
             self.logger.error(f"Error handling room.info data: {e}", exc_info=True)
 
-    def _handle_char_vitals(self, data: Dict[str, Any]) -> None:
+    def _handle_char_vitals(self, data: dict[str, Any]) -> None:
         """Handle char.vitals GMCP data.
 
         Args:
@@ -465,7 +463,7 @@ class GMCPManager:
         except Exception as e:
             self.logger.error(f"Error handling char.vitals data: {e}", exc_info=True)
 
-    def _handle_char_stats(self, data: Dict[str, Any]) -> None:
+    def _handle_char_stats(self, data: dict[str, Any]) -> None:
         """Handle char.stats GMCP data.
 
         Args:
@@ -481,7 +479,7 @@ class GMCPManager:
         except Exception as e:
             self.logger.error(f"Error handling char.stats data: {e}", exc_info=True)
 
-    def _handle_char_maxstats(self, data: Dict[str, Any]) -> None:
+    def _handle_char_maxstats(self, data: dict[str, Any]) -> None:
         """Handle char.maxstats GMCP data.
 
         Args:
@@ -497,7 +495,7 @@ class GMCPManager:
         except Exception as e:
             self.logger.error(f"Error handling char.maxstats data: {e}", exc_info=True)
 
-    def parse_gmcp_message(self, package: str, json_data: str) -> tuple[str, Dict[str, Any]]:
+    def parse_gmcp_message(self, package: str, json_data: str) -> tuple[str, dict[str, Any]]:
         """Parse a GMCP message into package and data.
 
         Args:
@@ -538,7 +536,7 @@ class GMCPManager:
         }
         return package in supported_packages
 
-    async def process_gmcp_data_async(self, package: str, data: Dict[str, Any]) -> None:
+    async def process_gmcp_data_async(self, package: str, data: dict[str, Any]) -> None:
         """Process GMCP data asynchronously.
 
         Args:

@@ -4,26 +4,23 @@ This module defines the database schema for migrating from JSON-based
 knowledge graph to SQLite using Peewee ORM.
 """
 
-import logging
 import json
-import time
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Optional
 
 from peewee import (
-    SqliteDatabase,
-    Model,
-    CharField,
-    TextField,
-    IntegerField,
-    FloatField,
-    BooleanField,
-    DateTimeField,
-    ForeignKeyField,
-    Index,
-    DoesNotExist,
     SQL,
+    BooleanField,
+    CharField,
+    DateTimeField,
+    DoesNotExist,
+    ForeignKeyField,
+    IntegerField,
+    Model,
+    SqliteDatabase,
+    TextField,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,7 +60,7 @@ class Entity(BaseModel):
             (('entity_type', 'name'), False),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the entity to a dictionary."""
         return {
             "id": self.id,
@@ -104,7 +101,7 @@ class Room(BaseModel):
         return f"Room {self.room_number}: {self.entity.name}"
 
     @classmethod
-    def create_or_update_from_dict(cls, data: Dict[str, Any]) -> Optional["Room"]:
+    def create_or_update_from_dict(cls, data: dict[str, Any]) -> Optional["Room"]:
         """Create or update a room from a dictionary using a more robust method.
 
         Returns:
@@ -237,7 +234,7 @@ class RoomExit(BaseModel):
         return f"Room {self.from_room.room_number} -> {self.direction} -> {self.to_room_number}"
 
     # --- Exit command memory helpers ---
-    def get_command_details(self) -> Dict[str, Any]:
+    def get_command_details(self) -> dict[str, Any]:
         """Return parsed JSON details for exit command sequence.
 
         Keys:
@@ -270,8 +267,8 @@ class RoomExit(BaseModel):
 
     def record_exit_success(
         self,
-        move_command: Optional[str],
-        pre_commands: Optional[List[str]] = None,
+        move_command: str | None,
+        pre_commands: list[str] | None = None,
         source: str = "observed",
     ) -> None:
         """Record a successful traversal for this exit.
@@ -280,17 +277,26 @@ class RoomExit(BaseModel):
         """
         details_dict = self.get_command_details()
 
-        if details_dict["move_command"] == move_command and details_dict["last_success_at"] is not None:
-            return
+        def _norm(s: str | None) -> str:
+            s = (s or "").strip().lower()
+            mapping = {
+                "north": "n", "south": "s", "east": "e", "west": "w", "up": "u", "down": "d",
+                "n": "n", "s": "s", "e": "e", "w": "w", "u": "u", "d": "d",
+            }
+            if s.startswith("enter "):
+                return "enter"
+            if s.startswith("board"):
+                return "board"
+            if s.startswith("escape"):
+                return "escape"
+            return mapping.get(s, s)
 
-        if self.direction != move_command:
-            # There must be something wrong with the tracking of the move command
-            # Probably some race condition issue
+        if _norm(self.direction) != _norm(move_command):
             return
 
         details_dict["move_command"] = move_command
-        details_dict["pre_commands"] = pre_commands
-        details_dict["last_success_at"] = datetime.utcnow().isoformat()
+        details_dict["pre_commands"] = pre_commands or []
+        details_dict["last_success_at"] = datetime.now(timezone.utc).isoformat()
         details_dict["source"] = source
 
         self.details = json.dumps(details_dict)
@@ -314,14 +320,14 @@ class NPC(BaseModel):
             # Room-based NPC queries
             (('current_room', 'npc_type'), False),
         )
-        constraints = [SQL('UNIQUE(entity, current_room)')]
+        constraints = [SQL('UNIQUE(entity_id, current_room_id)')]
 
     def __str__(self):
         room_info = f" in room {self.current_room.room_number}" if self.current_room else ""
         return f"NPC: {self.entity.name}{room_info}"
 
     @classmethod
-    def create_or_update_from_dict(cls, data: Dict[str, Any], current_room: Optional["Room"] = None) -> "NPC":
+    def create_or_update_from_dict(cls, data: dict[str, Any], current_room: Optional["Room"] = None) -> "NPC":
         """Create or update an NPC from a dictionary."""
         npc_name = data.get("name")
         if not npc_name:
@@ -394,7 +400,7 @@ class Relation(BaseModel):
 # Model registry for easy access
 ALL_MODELS = [Entity, Room, RoomExit, NPC, Observation, Relation]
 
-def get_db_stats() -> Dict[str, int]:
+def get_db_stats() -> dict[str, int]:
     """Get statistics about the database."""
     stats = {}
     for model in ALL_MODELS:
@@ -419,20 +425,16 @@ def initialize_database():
             db.close()
 
 
-def get_database_stats() -> Dict[str, int]:
+def get_database_stats() -> dict[str, int]:
     """Get statistics about the current database."""
-    stats = {}
+    stats: dict[str, int] = {}
     try:
-        db.connect()
         for model in ALL_MODELS:
             stats[model.__name__] = model.select().count()
         return stats
     except Exception as e:
         logger.error(f"Failed to get database stats: {e}", exc_info=True)
         return {}
-    finally:
-        if not db.is_closed():
-            db.close()
 
 
 def close_database():
@@ -457,7 +459,7 @@ class DatabaseContext:
 
 
 # Utility functions for common queries
-def get_room_by_number(room_number: int) -> Optional[Room]:
+def get_room_by_number(room_number: int) -> Room | None:
     """Get a room by its room number."""
     try:
         with DatabaseContext():
@@ -469,7 +471,7 @@ def get_room_by_number(room_number: int) -> Optional[Room]:
         return None
 
 
-def get_entity_by_name(name: str, entity_type: str = None) -> Optional[Entity]:
+def get_entity_by_name(name: str, entity_type: str = None) -> Entity | None:
     """Get an entity by name and optionally by type."""
     try:
         with DatabaseContext():
@@ -484,7 +486,7 @@ def get_entity_by_name(name: str, entity_type: str = None) -> Optional[Entity]:
         return None
 
 
-def get_room_exits(room_number: int) -> List[RoomExit]:
+def get_room_exits(room_number: int) -> list[RoomExit]:
     """Get all exits for a room."""
     try:
         with DatabaseContext():
@@ -497,12 +499,12 @@ def get_room_exits(room_number: int) -> List[RoomExit]:
         return []
 
 
-def find_path_between_rooms(from_room: int, to_room: int, max_depth: int = 20) -> List[str]:
+def find_path_between_rooms(from_room: int, to_room_number: int, max_depth: int = 20) -> list[str]:
     """Find a path between two rooms using BFS.
 
     Args:
         from_room: The room number of the starting room.
-        to_room: The room number of the destination room.
+        to_room_number: The room number of the destination room.
         max_depth: The maximum depth to search.
 
     Returns:
@@ -516,10 +518,12 @@ def find_path_between_rooms(from_room: int, to_room: int, max_depth: int = 20) -
             queue = deque([(from_room, [])])
             visited = {from_room}
 
+            dest_room = Room.select().join(Entity).where(Room.room_number == to_room_number).get()
+
             while queue and len(queue[0][1]) < max_depth:
                 current_room, path = queue.popleft()
 
-                if current_room == to_room:
+                if current_room == dest_room.room_number:
                     return path
 
                 # Get exits from current room

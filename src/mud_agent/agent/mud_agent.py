@@ -44,9 +44,13 @@ class MUDAgent:
         self.logger = logging.getLogger(__name__)
         self.events = EventManager()
 
-        # Create MUD client
+        # Create MUD client with 30-second keep-alive to prevent idle timeout
         self.client = MudClient(
-            host=config.mud.host, port=config.mud.port, debug_mode=False
+            host=config.mud.host,
+            port=config.mud.port,
+            debug_mode=False,
+            keep_alive_enabled=True,
+            keep_alive_interval=30.0  # Send keep-alive every 30 seconds
         )
 
         # Create MUD client tool
@@ -59,12 +63,15 @@ class MUDAgent:
             max_kg_failures=self.config.gmcp.max_kg_failures,
             event_manager=self.events  # Pass the event manager
         )
+        self.aardwolf_gmcp.agent = self
 
         # Create MCP manager
         self.mcp_manager = MCPManager()
 
         # The knowledge_graph is now a separate, dedicated manager
         self.knowledge_graph = GameKnowledgeGraph()
+        # Use a single shared knowledge graph instance across the agent and MCP manager
+        self.mcp_manager.knowledge_graph = self.knowledge_graph
 
         # Initialize the LiteLLM model for the CodeAgent
         self.model = None
@@ -236,6 +243,12 @@ class MUDAgent:
             if result:
                 self.state_manager.character_name = character_name
                 self.logger.info(f"Logged in as {character_name}")
+
+                # Initialize the knowledge graph before enabling GMCP updates
+                try:
+                    await self.knowledge_graph.initialize()
+                except Exception:
+                    self.logger.exception("Failed to initialize knowledge graph")
 
                 # Initialize GMCP support for Aardwolf
                 if self.client.gmcp_enabled:

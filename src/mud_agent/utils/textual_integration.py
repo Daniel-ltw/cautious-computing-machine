@@ -82,18 +82,17 @@ class TextualIntegration:
     def start(self):
         """Start the integration."""
         try:
-            console.print("[bold green]Starting Textual integration...[/]")
+            self.logger.info("Starting Textual integration...")
             self.running = True
 
             # Set up a timer to update the UI periodically using Textual's built-in timer
             if self.app:
                 self.app.set_interval(self.update_interval, self.update_ui)
-                console.print("[bold green]Set up UI update timer[/]")
+                self.logger.info("Set up UI update timer")
 
             self.logger.info("Textual integration started")
 
         except Exception as e:
-            console.print(f"[bold red]Error starting textual integration: {e}[/]")
             self.logger.error(f"Error starting textual integration: {e}", exc_info=True)
 
     def stop(self):

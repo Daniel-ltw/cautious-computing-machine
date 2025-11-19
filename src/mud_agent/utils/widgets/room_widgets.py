@@ -89,7 +89,14 @@ class RoomWidget(StateListener, RichLog):
             self.write(f"[dim]Details: {self.room_details}[/dim]")
         if self.exits:
             if isinstance(self.exits, dict):
-                exits_str = ", ".join(self.exits.keys())
+                # Format exits with room numbers in parentheses
+                exit_parts = []
+                for direction, room_num in self.exits.items():
+                    if room_num:
+                        exit_parts.append(f"{direction} ({room_num})")
+                    else:
+                        exit_parts.append(direction)
+                exits_str = ", ".join(exit_parts)
             elif isinstance(self.exits, list):
                 exits_str = ", ".join(self.exits)
             else:

@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 from .character_data import CharacterDataProcessor
 from .map_data import MapDataProcessor
@@ -25,7 +25,7 @@ class AardwolfGMCPManager:
     DEFAULT_KG_UPDATE_INTERVAL = 5.0  # seconds
     MAX_KG_UPDATE_FAILURES = 5
 
-    def __init__(self, client, event_manager, kg_update_interval: Optional[float] = None, max_kg_failures: Optional[int] = None):
+    def __init__(self, client, event_manager, kg_update_interval: float | None = None, max_kg_failures: int | None = None):
         """Initialize the GMCP manager.
 
         Args:
@@ -54,8 +54,18 @@ class AardwolfGMCPManager:
         # Initialization status
         self.initialized = False
 
+        # Knowledge graph update configuration
+        self.kg_update_interval = (
+            kg_update_interval if kg_update_interval is not None else self.DEFAULT_KG_UPDATE_INTERVAL
+        )
+        self.max_kg_failures = (
+            max_kg_failures if max_kg_failures is not None else self.MAX_KG_UPDATE_FAILURES
+        )
+        self._kg_update_failures = 0
+        self._kg_update_task: Any | None = None
+
         # Agent reference (set by the agent)
-        self.agent = None
+        self.agent: Any = None
 
 
 
@@ -128,6 +138,13 @@ class AardwolfGMCPManager:
 
             self.logger.debug("Aardwolf GMCP initialized and options enabled")
             self.initialized = True
+
+            try:
+                if self._kg_update_task is None:
+                    import asyncio as _asyncio
+                    self._kg_update_task = _asyncio.create_task(self._run_kg_update_loop())
+            except Exception:
+                pass
             return True
         except Exception as e:
             self.logger.error(f"Error initializing Aardwolf GMCP: {e}", exc_info=True)
@@ -240,6 +257,50 @@ class AardwolfGMCPManager:
             self.logger.debug("No GMCP updates received")
 
         return updates
+
+    async def _run_kg_update_loop(self) -> None:
+        try:
+            import asyncio as _asyncio
+            while True:
+                try:
+                    if self.agent and hasattr(self.agent, "knowledge_graph"):
+                        room_info = self.get_room_info()
+                        if room_info and room_info.get("num") and room_info.get("name"):
+                            entity_data = {
+                                "entityType": "Room",
+                                "room_number": room_info.get("num"),
+                                "name": room_info.get("name"),
+                                "description": room_info.get("desc", ""),
+                                "exits": room_info.get("exits", {}),
+                                "area": room_info.get("zone", room_info.get("area", "Unknown")),
+                                "coordinates": room_info.get("coord", {}),
+                                "npcs": room_info.get("npcs", []),
+                            }
+                            try:
+                                await self.agent.knowledge_graph.add_entity(entity_data)
+                                self._kg_update_failures = 0
+                            except Exception:
+                                self._kg_update_failures += 1
+                                if self._kg_update_failures >= self.max_kg_failures:
+                                    self.logger.error("Suspending KG updates due to repeated failures")
+                                    break
+                    await _asyncio.sleep(self.kg_update_interval)
+                except _asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    self._kg_update_failures += 1
+                    self.logger.error(f"KG update loop error: {e}", exc_info=True)
+                    await _asyncio.sleep(self.kg_update_interval)
+        finally:
+            self._kg_update_task = None
+
+    def stop_kg_update_loop(self) -> None:
+        try:
+            task = self._kg_update_task
+            if task and not task.done():
+                task.cancel()
+        except Exception:
+            pass
     def get_character_data(self) -> dict[str, Any]:
         """Get comprehensive character data from GMCP.
 

@@ -153,7 +153,7 @@ class BaseVitalStaticWidget(StateListener, BaseWidget):
         if subkey and isinstance(value, dict) and subkey in value:
             extracted = value[subkey]
             try:
-                if isinstance(extracted, str) or isinstance(extracted, float):
+                if isinstance(extracted, float | str):
                     return int(extracted)
                 return extracted
             except (ValueError, TypeError):
@@ -174,7 +174,7 @@ class BaseVitalStaticWidget(StateListener, BaseWidget):
         """Update the current value and refresh the display."""
         if value is not None:
             try:
-                if isinstance(value, str) or isinstance(value, float):
+                if isinstance(value, float | str):
                     value = int(value)
             except (ValueError, TypeError):
                 pass
@@ -186,7 +186,7 @@ class BaseVitalStaticWidget(StateListener, BaseWidget):
         """Update the max value and refresh the display."""
         if value is not None:
             try:
-                if isinstance(value, str) or isinstance(value, float):
+                if isinstance(value, float | str):
                     value = int(value)
             except (ValueError, TypeError):
                 pass
