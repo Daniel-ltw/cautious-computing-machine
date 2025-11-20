@@ -283,6 +283,8 @@ class RoomExit(BaseModel):
                 "north": "n", "south": "s", "east": "e", "west": "w", "up": "u", "down": "d",
                 "n": "n", "s": "s", "e": "e", "w": "w", "u": "u", "d": "d",
             }
+            if s.startswith("say "):
+                return "say"
             if s.startswith("enter "):
                 return "enter"
             if s.startswith("board"):

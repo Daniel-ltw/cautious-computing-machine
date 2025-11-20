@@ -349,7 +349,9 @@ class GameKnowledgeGraph:
                 exit_obj = None
                 for ex in from_room.exits:
                     stored = (ex.direction or "").strip().lower()
-                    if stored.startswith("enter "):
+                    if stored.startswith("say "):
+                        stored_norm = "say"
+                    elif stored.startswith("enter "):
                         stored_norm = "enter"
                     elif stored.startswith("board"):
                         stored_norm = "board"

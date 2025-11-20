@@ -44,13 +44,13 @@ class MUDAgent:
         self.logger = logging.getLogger(__name__)
         self.events = EventManager()
 
-        # Create MUD client with 30-second keep-alive to prevent idle timeout
+        # Create MUD client with 10-second keep-alive to prevent idle timeout
         self.client = MudClient(
             host=config.mud.host,
             port=config.mud.port,
             debug_mode=False,
             keep_alive_enabled=True,
-            keep_alive_interval=30.0  # Send keep-alive every 30 seconds
+            keep_alive_interval=10.0  # Send keep-alive every 10 seconds
         )
 
         # Create MUD client tool

@@ -153,7 +153,7 @@ def test_record_exit_success_with_enter_variations(test_db):
 
     exit_obj = RoomExit.create(from_room=room_a, direction="enter gate", to_room_number=2002, to_room=room_b)
 
-    exit_obj.record_exit_success(move_command="enter portal", pre_commands=["unlock portal"]) 
+    exit_obj.record_exit_success(move_command="enter portal", pre_commands=["unlock portal"])
 
     details = exit_obj.get_command_details()
     assert details["move_command"] == "enter portal"
@@ -168,11 +168,11 @@ def test_record_exit_success_updates_latest_commands(test_db):
 
     exit_obj = RoomExit.create(from_room=room_a, direction="north", to_room_number=3002, to_room=room_b)
 
-    exit_obj.record_exit_success(move_command="north", pre_commands=["open north"]) 
+    exit_obj.record_exit_success(move_command="north", pre_commands=["open north"])
     first_details = exit_obj.get_command_details()
     assert first_details["pre_commands"] == ["open north"]
 
-    exit_obj.record_exit_success(move_command="north", pre_commands=["unlock north"]) 
+    exit_obj.record_exit_success(move_command="north", pre_commands=["unlock north"])
     second_details = exit_obj.get_command_details()
     assert second_details["pre_commands"] == ["unlock north"]
     assert second_details["last_success_at"] != first_details["last_success_at"]
@@ -186,6 +186,21 @@ def test_record_exit_success_cardinal_synonyms(test_db):
 
     exit_obj = RoomExit.create(from_room=room_a, direction="n", to_room_number=3102, to_room=room_b)
 
-    exit_obj.record_exit_success(move_command="north", pre_commands=[]) 
+    exit_obj.record_exit_success(move_command="north", pre_commands=[])
     details = exit_obj.get_command_details()
     assert details["move_command"] == "north"
+
+
+def test_record_exit_success_with_say_variations(test_db):
+    room_entity1 = Entity.create(name="Room A", entity_type="Room")
+    room_entity2 = Entity.create(name="Room B", entity_type="Room")
+    room_a = Room.create(entity=room_entity1, room_number=4001)
+    room_b = Room.create(entity=room_entity2, room_number=4002)
+
+    exit_obj = RoomExit.create(from_room=room_a, direction="say xyzzy", to_room_number=4002, to_room=room_b)
+
+    exit_obj.record_exit_success(move_command="say abracadabra", pre_commands=[])
+    details = exit_obj.get_command_details()
+    assert details["move_command"] == "say abracadabra"
+    assert details["pre_commands"] == []
+

@@ -50,6 +50,7 @@ class RoomManager:
         pending_exit = None
         for tok in tokens:
             if tok.startswith("say "):
+                self.logger.info(f"Say command detected: '{tok}' - triggering force exit check from room {self.current_room.get('num') if self.current_room else 'unknown'}")
                 asyncio.create_task(self.events.emit("force_exit_check", command=tok))
 
             if pending_exit is None and any(tok.startswith(v) for v in pre_command_verbs):
@@ -87,13 +88,15 @@ class RoomManager:
         """Wait and check if a room change occurred after a command."""
         from_room_num = self.current_room.get("num") if self.current_room else None
         if not from_room_num:
+            self.logger.debug(f"Force exit check skipped - no current room for command: {command}")
             return
 
+        self.logger.debug(f"Force exit check: waiting 2s to detect room change after '{command}' from room {from_room_num}")
         await asyncio.sleep(2.0)
 
         new_room_num = self.current_room.get("num") if self.current_room else None
         if new_room_num and new_room_num != from_room_num:
-            self.logger.info(f"Implicit room change detected after command: {command}")
+            self.logger.info(f"✓ Implicit room change detected! '{command}' moved from room {from_room_num} → {new_room_num}")
             await self.knowledge_graph.record_exit_success(
                 from_room_num=from_room_num,
                 to_room_num=new_room_num,
@@ -101,6 +104,8 @@ class RoomManager:
                 move_cmd=command,
                 pre_cmds=[],
             )
+        else:
+            self.logger.debug(f"No room change detected after '{command}' (from: {from_room_num}, after: {new_room_num})")
 
     def _get_direction_from_command(self, command: str) -> str | None:
         """Extracts a direction from a command string."""

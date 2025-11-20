@@ -37,7 +37,7 @@ NEGOTIATION_TIMEOUT = 10.0  # Timeout for protocol negotiation in seconds
 LOGIN_PASSWORD_DELAY = 1.5  # Delay after sending username before sending password
 LOGIN_RESPONSE_DELAY = 3.0  # Delay after sending password to wait for login response
 SMALL_NEGOTIATION_DELAY = 0.1  # Small delay between protocol negotiations
-KEEP_ALIVE_INTERVAL = 30.0  # Seconds between keep-alive packets
+KEEP_ALIVE_INTERVAL = 10.0  # Seconds between keep-alive packets
 KEEP_ALIVE_TIMEOUT = 180.0  # Seconds of inactivity before connection is considered dead
 
 
