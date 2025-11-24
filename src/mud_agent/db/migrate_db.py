@@ -38,6 +38,7 @@ def main():
     print("=" * 50)
 
     # Default database path (same as in models.py)
+    project_root = Path(__file__).parent.parent.parent.parent
     default_db_path = project_root / ".mcp" / "knowledge_graph.db"
 
     # Check for rollback flag

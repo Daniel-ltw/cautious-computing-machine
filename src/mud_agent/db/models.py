@@ -222,12 +222,12 @@ class RoomExit(BaseModel):
 
     class Meta:
         indexes = (
-            # Unique constraint on from_room + to_room_number
-            (('from_room', 'to_room_number'), True),
-            # Index for outwards lookups
-            (('from_room', 'direction'), False),
+            # Unique constraint on from_room + direction (ensures unique exit names per room)
+            (('from_room', 'direction'), True),
             # Index for reverse lookups
             (('to_room_number', 'direction'), False),
+            # Index for to_room_number (was part of the unique constraint before)
+            (('to_room_number',), False),
         )
 
     def __str__(self):
@@ -293,7 +293,13 @@ class RoomExit(BaseModel):
                 return "escape"
             return mapping.get(s, s)
 
-        if _norm(self.direction) != _norm(move_command):
+        norm_dir = _norm(self.direction)
+        norm_cmd = _norm(move_command)
+
+        # Allow match if normalized forms match OR if the command ends with the direction
+        # e.g. direction="portal", move_command="enter portal" -> norm_dir="portal", norm_cmd="enter" -> mismatch
+        # but "enter portal".endswith("portal") -> match
+        if norm_dir != norm_cmd and not move_command.strip().lower().endswith(self.direction.strip().lower()):
             return
 
         details_dict["move_command"] = move_command
@@ -539,7 +545,14 @@ def find_path_between_rooms(from_room: int, to_room_number: int, max_depth: int 
                         command_details = exit.get_command_details()
                         if len(command_details.get("pre_commands")) > 0:
                             new_path.extend(command_details["pre_commands"])
-                        new_path.append(exit.direction)
+
+                        # Use the recorded move command if available, otherwise fallback to direction
+                        move_cmd = command_details.get("move_command")
+                        if move_cmd:
+                            new_path.append(move_cmd)
+                        else:
+                            new_path.append(exit.direction)
+
                         queue.append((next_room, new_path))
 
             return []  # No path found

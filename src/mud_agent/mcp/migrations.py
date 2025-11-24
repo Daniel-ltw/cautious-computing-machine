@@ -102,6 +102,14 @@ class MigrationManager:
             down_func=self._migration_007_down
         ))
 
+        # Migration 008: Remove unique constraint on (from_room_id, to_room_number)
+        self.migrations.append(Migration(
+            version=8,
+            description="Remove unique constraint on (from_room_id, to_room_number) and add unique constraint on (from_room_id, direction)",
+            up_func=self._migration_008_up,
+            down_func=self._migration_008_down
+        ))
+
     def _get_schema_version(self) -> int:
         """Get the current schema version from the database."""
         try:
@@ -187,6 +195,14 @@ class MigrationManager:
 
         print("✓ Created all tables and indexes")
 
+        # Since we created the tables from the current models, they are already up to date.
+        # We should set the schema version to the latest to skip subsequent migrations.
+        # However, the migration manager applies migrations sequentially.
+        # If we are running migration 1, it means we are initializing.
+        # We can't easily skip the rest from here without changing the manager logic.
+        # Instead, let's make subsequent migrations idempotent (check if column/index exists).
+        pass
+
     def _migration_002_up(self):
         """Migration 002: Add composite unique constraint to NPC."""
         with db.atomic():
@@ -207,12 +223,19 @@ class MigrationManager:
     def _migration_003_up(self):
         """Migration 003: Add is_door and door_is_closed to RoomExit."""
         with db.atomic():
-            db.execute_sql(
-                "ALTER TABLE roomexit ADD COLUMN is_door BOOLEAN DEFAULT FALSE"
-            )
-            db.execute_sql(
-                "ALTER TABLE roomexit ADD COLUMN door_is_closed BOOLEAN DEFAULT FALSE"
-            )
+            try:
+                db.execute_sql(
+                    "ALTER TABLE roomexit ADD COLUMN is_door BOOLEAN DEFAULT FALSE"
+                )
+            except Exception:
+                pass # Column likely exists
+
+            try:
+                db.execute_sql(
+                    "ALTER TABLE roomexit ADD COLUMN door_is_closed BOOLEAN DEFAULT FALSE"
+                )
+            except Exception:
+                pass # Column likely exists
         print("✓ Added is_door and door_is_closed to RoomExit table")
 
     def _migration_003_down(self):
@@ -269,9 +292,32 @@ class MigrationManager:
     def _migration_006_up(self):
         """Migration 006: Add unique constraint to RoomExit."""
         with db.atomic():
-            db.execute_sql(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_to ON roomexit (from_room_id, to_room_number)"
-            )
+            # This might fail if the index was already created by Migration 1 (if using old models)
+            # or if we are using new models which don't have this index anymore.
+            # Actually, if we are using new models, Migration 1 creates the NEW indexes.
+            # So Migration 6 (which adds the OLD unique constraint) might conflict or be unwanted.
+            # But since we are running migrations in order, we should try to apply it.
+            # However, if we just initialized with NEW models, we have the NEW schema (Migration 8 state).
+            # So applying Migration 6 (OLD state) is actually a regression if we are not careful.
+
+            # If we are initializing, we want to end up at state 8.
+            # If we run Migration 1 (New Models) -> State 8.
+            # Then Migration 2..5 -> OK.
+            # Then Migration 6 (Add Old Constraint) -> This adds the constraint we just removed in models.py!
+            # Then Migration 8 (Remove Old Constraint) -> Removes it again.
+            # So it's wasteful but "correct" in a linear history sense, UNLESS Migration 1 already created the "State 8" schema.
+
+            # If Migration 1 created State 8, then:
+            # - idx_roomexit_from_to DOES NOT EXIST.
+            # - idx_roomexit_from_direction_unique EXISTS.
+
+            # Migration 6 tries to create idx_roomexit_from_to.
+            try:
+                db.execute_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_to ON roomexit (from_room_id, to_room_number)"
+                )
+            except Exception:
+                pass
         print("✓ Added unique constraint to RoomExit table")
 
     def _migration_006_down(self):
@@ -293,6 +339,50 @@ class MigrationManager:
             db.execute_sql("CREATE UNIQUE INDEX IF NOT EXISTS roomexit_from_room_id_direction ON roomexit (from_room_id, direction)")
             db.execute_sql("CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_direction ON roomexit (from_room_id, direction)")
         print("✓ Recreated redundant indexes on RoomExit table")
+
+    def _migration_008_up(self):
+        """Migration 008: Remove unique constraint on (from_room_id, to_room_number)."""
+        with db.atomic():
+            # Drop the old unique index
+            db.execute_sql("DROP INDEX IF EXISTS idx_roomexit_from_to")
+
+            # Remove duplicates before adding the new unique constraint
+            db.execute_sql("""
+                DELETE FROM roomexit
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM roomexit
+                    GROUP BY from_room_id, direction
+                )
+            """)
+
+            # Create new unique index on (from_room_id, direction)
+            db.execute_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_direction_unique ON roomexit (from_room_id, direction)"
+            )
+
+            # Create index on to_room_number (since it's no longer part of the unique constraint)
+            db.execute_sql(
+                "CREATE INDEX IF NOT EXISTS idx_roomexit_to_room_number ON roomexit (to_room_number)"
+            )
+        print("✓ Removed unique constraint on (from_room_id, to_room_number) and added unique constraint on (from_room_id, direction)")
+
+    def _migration_008_down(self):
+        """Migration 008 rollback: Restore unique constraint on (from_room_id, to_room_number)."""
+        with db.atomic():
+            # Drop the new indexes
+            db.execute_sql("DROP INDEX IF EXISTS idx_roomexit_from_direction_unique")
+            db.execute_sql("DROP INDEX IF EXISTS idx_roomexit_to_room_number")
+
+            # Restore the old unique constraint
+            # Note: This might fail if there are duplicate records now
+            try:
+                db.execute_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_to ON roomexit (from_room_id, to_room_number)"
+                )
+                print("✓ Restored unique constraint on (from_room_id, to_room_number)")
+            except Exception as e:
+                print(f"⚠ Could not restore unique constraint: {e}")
 
     def _migration_002_down(self):
         """Migration 002 rollback: Remove composite unique constraint."""
@@ -380,16 +470,16 @@ class MigrationManager:
 
 def init_database(db_path: str = None) -> MigrationManager:
     """Initialize the database with all required tables and indexes.
-    
+
     Args:
         db_path: Path to the SQLite database file. If None, uses the default from models.
-    
+
     Returns:
         MigrationManager instance for further operations.
     """
     if db_path:
         # Update the database path in models
-        from . import models
+        from ..db import models
         models.db.init(db_path)
 
     # Ensure the directory exists

@@ -359,9 +359,17 @@ class GameKnowledgeGraph:
                         stored_norm = "escape"
                     else:
                         stored_norm = mapping.get(stored, stored)
+
+                    # Direct match
                     if stored_norm == dir_key:
                         exit_obj = ex
                         break
+
+                    # Check if the command contains the stored direction (e.g. "enter portal" matches "portal")
+                    # This handles cases where the exit is named "portal" but the command is "enter portal"
+                    if dir_in.endswith(stored) and len(stored) > 2: # Ensure stored isn't just a short direction like 'n'
+                         exit_obj = ex
+                         break
 
                 self.logger.debug(
                     f"Recording exit success: {from_room_num} -> {to_room_num} ({direction} -> {dir_key})"
