@@ -461,8 +461,11 @@ class MudClient:
             self.last_command = stripped_command
             self.last_command_time = current_time
 
-            # Emit a 'command_sent' event before sending
-            self.events.emit("command_sent", stripped_command)
+            # NOTE: command_sent event is now emitted in command_processor.py with from_room_num
+            # to avoid race condition. This emit is kept for backward compatibility but will
+            # be redundant if using command_processor.
+            # Emit a 'command_sent' event before sending (old format for backward compat)
+
 
             # Set the current command and reset response collection
             self.current_command = stripped_command

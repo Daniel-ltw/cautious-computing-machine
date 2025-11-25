@@ -57,9 +57,17 @@ class CommandProcessor:
             str: The response from the MUD server
         """
         try:
+        try:
+            # Capture the current room number BEFORE sending the command to avoid race condition
+            # where GMCP updates arrive before the command_sent handler runs
+            from_room_num = None
+            if hasattr(self.agent, 'room_manager'):
+                from_room_num = self.agent.room_manager._get_current_room_num()
+                self.logger.debug(f"Captured from_room_num={from_room_num} BEFORE sending command '{command}'")
+
             # Emit the command_sent event before processing
             if hasattr(self.agent, "events"):
-                await self.agent.events.emit("command_sent", command)
+                await self.agent.events.emit("command_sent", command=command, from_room_num=from_room_num)
 
             # Store the last command
             self.agent.last_command = command
@@ -73,8 +81,9 @@ class CommandProcessor:
                 command, is_user_command=is_user_command
             )
 
-            # After sending the command, notify the room_manager
-            await self.room_manager._handle_command_sent(command)
+            # After sending the command, the 'command_sent' event (with from_room_num) has already been emitted.
+            # The RoomManager will handle the command via the event listener, so no direct call is needed.
+            # No direct call to room_manager._handle_command_sent here anymore.
 
             # For look commands, room data will be sent automatically by the server
             if command.lower() == "look" or command.lower() == "l":

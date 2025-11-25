@@ -371,19 +371,44 @@ class GameKnowledgeGraph:
                          exit_obj = ex
                          break
 
-                self.logger.debug(
+                self.logger.info(
                     f"Recording exit success: {from_room_num} -> {to_room_num} ({direction} -> {dir_key})"
                     f" with move command '{move_cmd}'"
                     f" pre-commands: {pre_cmds}"
                 )
-                if exit_obj is None:
-                    exit_obj = self.get_or_create_exit(from_room, dir_in, to_room_number=to_room_num)
 
+                # Let's refactor slightly to track if we used fallback.
+                is_fallback = False
+                if exit_obj is None:
+                    try:
+                        exit_obj = self.get_or_create_exit(from_room, dir_in, to_room_number=to_room_num)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to get_or_create_exit for {dir_in}: {e}. Trying fallback.")
+                        for ex in from_room.exits:
+                            if ex.to_room_number == to_room_num:
+                                exit_obj = ex
+                                is_fallback = True
+                                self.logger.info(f"Fallback: Found existing exit to {to_room_num} ({ex.direction}). Updating it with new command.")
+                                break
+
+                        if not is_fallback:
+                            self.logger.error(f"Could not record exit {dir_in} -> {to_room_num} even with fallback.")
+                            return
+
+
+                self.logger.warning(f"Found existing exit {dir_in} -> {to_room_num}. Updating it with new command.")
                 exit_obj.to_room = to_room
                 exit_obj.to_room_number = to_room_num
-                exit_obj.record_exit_success(
-                    move_command=move_cmd, pre_commands=pre_cmds or []
-                )
+                exit_obj.save()
+
+                # Check if details are already fully populated - skip if so
+                existing_details = exit_obj.get_command_details()
+                if (existing_details.get("move_command") == move_cmd):
+                    self.logger.debug(f"Exit {exit_obj.direction} already has correct details, skipping update.")
+                else:
+                    exit_obj.record_exit_success(
+                        move_command=move_cmd, pre_commands=pre_cmds or [], force=is_fallback
+                    )
         except DoesNotExist:
             # This case should ideally not be hit for from_room or to_room if they are managed correctly.
             self.logger.warning(
@@ -416,12 +441,23 @@ class GameKnowledgeGraph:
 
         except DoesNotExist:
             # Exit does not exist, so create a new one
-            return RoomExit.create(
-                from_room=from_room,
-                direction=direction,
-                to_room=to_room,
-                to_room_number=to_room_number,
-            )
+            try:
+                return RoomExit.create(
+                    from_room=from_room,
+                    direction=direction,
+                    to_room=to_room,
+                    to_room_number=to_room_number,
+                )
+            except IntegrityError:
+                # Race condition or case sensitivity issue - the exit was just created
+                # or already exists but wasn't found. Try to get it again.
+                self.logger.warning(f"IntegrityError creating exit {direction}, retrying get")
+                try:
+                    return from_room.exits.where(RoomExit.direction == direction).get()
+                except DoesNotExist:
+                    # Still not found - this is a real problem
+                    self.logger.error(f"Failed to get or create exit {direction} even after IntegrityError")
+                    raise
 
 
 

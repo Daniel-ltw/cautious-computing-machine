@@ -18,7 +18,7 @@ class RoomManager:
         self.events = agent.events
         self.knowledge_graph = agent.knowledge_graph
         self.logger = logging.getLogger(__name__)
-        self.pending_exit_command: str | None = None
+        self.previous_room_num: int | None = None  # Track the last known room number before an update
         # Commands that should be executed before movement (e.g., opening/unlocking doors)
         self.pending_pre_commands: set[str] = set()
         self.from_room_num_on_exit: int | None = None
@@ -31,10 +31,41 @@ class RoomManager:
         self.events.on("command_sent", self._handle_command_sent)
         self.events.on("room_update", self._on_room_update)
         self.events.on("force_exit_check", self._handle_force_exit_check)
+        self.logger.info(f"✓ RoomManager subscribed to events. EventManager ID: {id(self.events)}")
+        self.logger.info(f"  Subscribed handlers: command_sent={self._handle_command_sent}, room_update={self._on_room_update}")
 
-    async def _handle_command_sent(self, command: str) -> None:
-        """Handle the command_sent event."""
+    def _get_current_room_num(self) -> int | None:
+        """Get the current room number, with fallback to state_manager."""
+        # Try to get from our tracked room data first
+        if self.current_room and self.current_room.get("num"):
+            room_num = self.current_room.get("num")
+            self.logger.debug(f"_get_current_room_num: Using current_room.num = {room_num}")
+            return room_num
+        # Fallback to state_manager
+        if hasattr(self.agent, 'state_manager') and self.agent.state_manager.room_num:
+            room_num = self.agent.state_manager.room_num
+            self.logger.debug(f"_get_current_room_num: Using state_manager.room_num = {room_num} (current_room not available)")
+            return room_num
+        self.logger.warning("_get_current_room_num: No room number available from any source!")
+        return None
+
+    async def _handle_command_sent(self, **kwargs) -> None:
+        """Handle the command_sent event.
+
+        Args:
+            **kwargs: Event data, may contain 'command' and 'from_room_num'
+        """
+        # Support both old format (positional command arg) and new format (kwargs)
+        command = kwargs.get('command', kwargs.get('0'))  # '0' for backward compat with positional
+        from_room_num_captured = kwargs.get('from_room_num')
+
+        if not command:
+            self.logger.warning("command_sent event received with no command")
+            return
+
         cmd_lower = command.lower().strip()
+
+        self.logger.debug(f"Handling command_sent: '{cmd_lower}', from_room_num={from_room_num_captured}")
 
         movement_commands = [
             "n", "s", "e", "w", "u", "d",
@@ -56,9 +87,7 @@ class RoomManager:
             if pending_exit is None and any(tok.startswith(v) for v in pre_command_verbs):
                 self.pending_pre_commands.add(tok)
                 if self.from_room_num_on_exit is None:
-                    self.from_room_num_on_exit = (
-                        self.current_room.get("num") if self.current_room else None
-                    )
+                    self.from_room_num_on_exit = self._get_current_room_num()
                 continue
 
             if pending_exit is None and (
@@ -69,24 +98,39 @@ class RoomManager:
 
         if pending_exit:
             self.pending_exit_command = pending_exit
-            from_room_num = self.current_room.get("num") if self.current_room else None
+            # Use the captured from_room_num from the event (if available) to avoid race conditions
+            # where GMCP updates arrive before we can read the current room
+            if from_room_num_captured is not None:
+                from_room_num = from_room_num_captured
+                self.logger.info(f"Using captured from_room_num={from_room_num} (before GMCP update)")
+            else:
+                from_room_num = self._get_current_room_num()
+                self.logger.warning(f"No captured from_room_num, falling back to _get_current_room_num()={from_room_num}")
+
             self.from_room_num_on_exit = from_room_num
-            self.logger.debug(
-                f"Movement command `{self.pending_exit_command}` sent from room {from_room_num}."
+            self.logger.info(
+                f"✓ Movement command `{self.pending_exit_command}` detected from room {from_room_num}."
             )
-            try:
-                await asyncio.wait_for(self.events.wait("room_update"), timeout=5.0)
-            except TimeoutError:
-                self.logger.warning(f"Timeout waiting for room update after command: {command}")
-                self.pending_exit_command = None
-                self.from_room_num_on_exit = None
-                self.pending_pre_commands.clear()
+            self.logger.info(
+                f"  current_room data: {self.current_room.get('num') if self.current_room else 'None'}, "
+                f"state_manager.room_num: {self.agent.state_manager.room_num if hasattr(self.agent, 'state_manager') else 'N/A'}"
+            )
+            # After detecting movement command, we set pending state and let _on_room_update handle the exit when it arrives.
+            # No need to explicitly wait here; the room_update event may have already been emitted.
+            # The pending state will be cleared by _on_room_update after successful recording or by timeout logic elsewhere.
         else:
+            # Command not recognized as a known movement command
+            # Check if it's a pre-command (already handled above)
+            is_pre_command = any(cmd_lower.startswith(v) for v in pre_command_verbs)
+            if not is_pre_command:
+                # Trigger force exit check to catch any unrecognized movement commands
+                self.logger.debug(f"Command '{cmd_lower}' not recognized - triggering force exit check")
+                asyncio.create_task(self.events.emit("force_exit_check", command=cmd_lower))
             self.pending_exit_command = None
 
     async def _handle_force_exit_check(self, command: str) -> None:
         """Wait and check if a room change occurred after a command."""
-        from_room_num = self.current_room.get("num") if self.current_room else None
+        from_room_num = self._get_current_room_num()
         if not from_room_num:
             self.logger.debug(f"Force exit check skipped - no current room for command: {command}")
             return
@@ -94,16 +138,24 @@ class RoomManager:
         self.logger.debug(f"Force exit check: waiting 2s to detect room change after '{command}' from room {from_room_num}")
         await asyncio.sleep(2.0)
 
-        new_room_num = self.current_room.get("num") if self.current_room else None
+        new_room_num = self._get_current_room_num()
         if new_room_num and new_room_num != from_room_num:
-            self.logger.info(f"✓ Implicit room change detected! '{command}' moved from room {from_room_num} → {new_room_num}")
+            # Collect any pending pre-commands that were set
+            pre_cmds = list(self.pending_pre_commands) if self.pending_pre_commands else []
+            self.logger.info(
+                f"✓ Implicit room change detected! '{command}' moved from room {from_room_num} → {new_room_num}"
+                + (f" (with pre-commands: {pre_cmds})" if pre_cmds else "")
+            )
             await self.knowledge_graph.record_exit_success(
                 from_room_num=from_room_num,
                 to_room_num=new_room_num,
                 direction=command,
                 move_cmd=command,
-                pre_cmds=[],
+                pre_cmds=pre_cmds,
             )
+            # Clear pre-commands after recording
+            self.pending_pre_commands.clear()
+            self.from_room_num_on_exit = None
         else:
             self.logger.debug(f"No room change detected after '{command}' (from: {from_room_num}, after: {new_room_num})")
 
@@ -126,10 +178,34 @@ class RoomManager:
 
     async def _on_room_update(self, **kwargs):
         """Handles the room_update event from the StateManager."""
+        self.logger.info(f"🔔 _on_room_update called with kwargs keys: {list(kwargs.keys())}")
+
         room_data = kwargs.get("room_data", kwargs)
         if not room_data or not room_data.get("num"):
             self.logger.warning(f"Received incomplete room data: {room_data}")
             return
+
+        # Track previous room number before updating
+        previous_num = self.current_room.get('num') if self.current_room else None
+        if previous_num is not None:
+            self.previous_room_num = previous_num
+            self.logger.debug(f"_on_room_update: previous_room_num stored as {previous_num}")
+        else:
+            self.logger.debug("_on_room_update: No previous room number to store")
+
+        # Update current room data
+        self.current_room = room_data
+        self.current_exits = room_data.get("exits", {})
+
+        self.logger.debug(f"_on_room_update: current_room updated to num={room_data.get('num')}")
+        # Update knowledge graph with new room data
+        self.logger.debug(f"Updating knowledge graph with room data: {room_data}")
+        try:
+            await self.knowledge_graph.add_entity({"entityType": "Room", **room_data})
+        except Exception:
+            self.logger.exception("Error adding room entity to knowledge graph")
+
+        self.logger.info(f"Room data received: num={room_data.get('num')}, name={room_data.get('name', 'N/A')}")
 
         try:
             incoming_room_num = room_data.get("num")
@@ -183,16 +259,6 @@ class RoomManager:
                     self.logger.debug(
                         "Room number unchanged after move command; likely a stale update or failed move. Waiting for new room data or timeout."
                     )
-
-            # Always update the current room state and knowledge graph
-            self.current_room = room_data
-            self.current_exits = room_data.get("exits", {})
-
-            self.logger.debug(f"Updating knowledge graph with room data: {room_data}")
-            try:
-                await self.knowledge_graph.add_entity({"entityType": "Room", **room_data})
-            except Exception:
-                self.logger.exception("Failed to update knowledge graph with room data")
 
             # Emit events for other components to consume
             asyncio.create_task(self.events.emit("state_update", update_type="room", data=room_data))

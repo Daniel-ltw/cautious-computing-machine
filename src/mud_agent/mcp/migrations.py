@@ -110,6 +110,14 @@ class MigrationManager:
             down_func=self._migration_008_down
         ))
 
+        # Migration 009: Revert to unique constraint on (from_room_id, to_room_number)
+        self.migrations.append(Migration(
+            version=9,
+            description="Revert to unique constraint on (from_room_id, to_room_number) - the correct design",
+            up_func=self._migration_009_up,
+            down_func=self._migration_009_down
+        ))
+
     def _get_schema_version(self) -> int:
         """Get the current schema version from the database."""
         try:
@@ -383,6 +391,46 @@ class MigrationManager:
                 print("✓ Restored unique constraint on (from_room_id, to_room_number)")
             except Exception as e:
                 print(f"⚠ Could not restore unique constraint: {e}")
+
+    def _migration_009_up(self):
+        """Migration 009: Revert to unique constraint on (from_room_id, to_room_number)."""
+        with db.atomic():
+            # Drop the incorrect unique index from Migration 008
+            db.execute_sql("DROP INDEX IF EXISTS idx_roomexit_from_direction_unique")
+
+            # Remove duplicates by (from_room_id, to_room_number) before adding constraint
+            db.execute_sql("""
+                DELETE FROM roomexit
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM roomexit
+                    GROUP BY from_room_id, to_room_number
+                )
+            """)
+
+            # Restore the correct unique constraint on (from_room_id, to_room_number)
+            db.execute_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_to ON roomexit (from_room_id, to_room_number)"
+            )
+
+            # Keep the non-unique index on (from_room_id, direction) for lookups
+            db.execute_sql(
+                "CREATE INDEX IF NOT EXISTS idx_roomexit_from_direction ON roomexit (from_room_id, direction)"
+            )
+        print("✓ Reverted to unique constraint on (from_room_id, to_room_number)")
+
+    def _migration_009_down(self):
+        """Migration 009 rollback: Go back to unique constraint on (from_room_id, direction)."""
+        with db.atomic():
+            # Drop the restored constraint
+            db.execute_sql("DROP INDEX IF EXISTS idx_roomexit_from_to")
+            db.execute_sql("DROP INDEX IF EXISTS idx_roomexit_from_direction")
+
+            # Recreate the Migration 008 state
+            db.execute_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_direction_unique ON roomexit (from_room_id, direction)"
+            )
+        print("✓ Rolled back to unique constraint on (from_room_id, direction)")
 
     def _migration_002_down(self):
         """Migration 002 rollback: Remove composite unique constraint."""

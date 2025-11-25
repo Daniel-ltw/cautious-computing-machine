@@ -222,12 +222,12 @@ class RoomExit(BaseModel):
 
     class Meta:
         indexes = (
-            # Unique constraint on from_room + direction (ensures unique exit names per room)
-            (('from_room', 'direction'), True),
+            # Unique constraint on from_room + to_room_number (only one exit per destination)
+            (('from_room', 'to_room_number'), True),
+            # Index for looking up exits by direction
+            (('from_room', 'direction'), False),
             # Index for reverse lookups
             (('to_room_number', 'direction'), False),
-            # Index for to_room_number (was part of the unique constraint before)
-            (('to_room_number',), False),
         )
 
     def __str__(self):
@@ -270,6 +270,7 @@ class RoomExit(BaseModel):
         move_command: str | None,
         pre_commands: list[str] | None = None,
         source: str = "observed",
+        force: bool = False,
     ) -> None:
         """Record a successful traversal for this exit.
 
@@ -299,7 +300,7 @@ class RoomExit(BaseModel):
         # Allow match if normalized forms match OR if the command ends with the direction
         # e.g. direction="portal", move_command="enter portal" -> norm_dir="portal", norm_cmd="enter" -> mismatch
         # but "enter portal".endswith("portal") -> match
-        if norm_dir != norm_cmd and not move_command.strip().lower().endswith(self.direction.strip().lower()):
+        if not force and norm_dir != norm_cmd and not move_command.strip().lower().endswith(self.direction.strip().lower()):
             return
 
         details_dict["move_command"] = move_command
