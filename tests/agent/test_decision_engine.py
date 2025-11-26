@@ -20,22 +20,50 @@ class TestDecisionEngine:
 
         self.engine = DecisionEngine(self.event_manager, self.client)
 
+        # Mock agent and attach to engine
+        self.agent = MagicMock()
+        self.engine.agent = self.agent
+
+        # Mock agent components
+        self.agent.room_manager = MagicMock()
+        self.agent.room_manager.current_room = "Test Room"
+        self.agent.room_manager.current_exits = ["north", "south"]
+
+        self.agent.state_manager = MagicMock()
+        self.agent.state_manager.health = {"current": 100, "max": 100}
+        self.agent.state_manager.mana = {"current": 100, "max": 100}
+        self.agent.state_manager.movement = {"current": 100, "max": 100}
+        self.agent.state_manager.level = 10
+        self.agent.state_manager.experience = 0
+        self.agent.state_manager.gold = 0
+        self.agent.state_manager.status = []
+
+        self.agent.code_agent = None
+        self.agent.model = MagicMock()
+        self.agent.sequential_thinking_tool = MagicMock()
+        self.agent.automation_manager = MagicMock()
+        self.agent.quest_manager = MagicMock()
+        self.agent.check_quest_status = AsyncMock(return_value=(False, "No active quest"))
+        self.agent.last_response = ""
+        self.agent.last_command = ""
+
     def test_initialization(self):
         """Test DecisionEngine initialization."""
-        assert self.engine.event_manager == self.event_manager
+        assert self.engine.events == self.event_manager
         assert self.engine.client == self.client
         assert self.engine.logger is not None
-        assert self.engine.code_agent is None  # Not initialized by default
+        assert self.engine.agent.code_agent is None  # Not initialized by default
 
-    def test_initialize_code_agent(self):
+    @pytest.mark.asyncio
+    async def test_initialize_code_agent(self):
         """Test code agent initialization."""
         with patch('mud_agent.agent.decision_engine.CodeAgent') as mock_agent:
             mock_instance = MagicMock()
             mock_agent.return_value = mock_instance
 
-            self.engine.initialize_code_agent()
+            await self.engine.initialize_code_agent()
 
-            assert self.engine.code_agent is not None
+            assert self.engine.agent.code_agent is not None
 
     @pytest.mark.asyncio
     async def test_decide_next_action_no_context(self):
@@ -113,7 +141,8 @@ class TestDecisionEngine:
             assert isinstance(result, str)
             assert len(result) > 0
 
-    def test_generate_third_thought_combat(self):
+    @pytest.mark.asyncio
+    async def test_generate_third_thought_combat(self):
         """Test third thought generation during combat."""
         if not hasattr(self.engine, 'recent_commands'):
             self.engine.recent_commands = ["attack"]
@@ -121,12 +150,13 @@ class TestDecisionEngine:
         with patch.object(self.engine, 'client') as mock_client:
             mock_client.last_response = "You attack the goblin"
 
-            result = self.engine._generate_third_thought(in_combat=True, context=None)
+            result = await self.engine._generate_third_thought(in_combat=True, context=None)
 
             assert isinstance(result, str)
             assert len(result) > 0
 
-    def test_generate_third_thought_with_context(self):
+    @pytest.mark.asyncio
+    async def test_generate_third_thought_with_context(self):
         """Test third thought generation with context."""
         if not hasattr(self.engine, 'recent_commands'):
             self.engine.recent_commands = ["quest request"]
@@ -134,7 +164,7 @@ class TestDecisionEngine:
         with patch.object(self.engine, 'client') as mock_client:
             mock_client.last_response = "Quest accepted"
 
-            result = self.engine._generate_third_thought(in_combat=False, context="questing")
+            result = await self.engine._generate_third_thought(in_combat=False, context="questing")
 
             assert isinstance(result, str)
             assert len(result) > 0
@@ -326,8 +356,6 @@ class TestDecisionEngine:
         from mud_agent.agent.decision_engine import (
             ZERO,
             LOW_HEALTH_THRESHOLD,
-            HIGH_HEALTH_THRESHOLD,
-            LOW_MANA_THRESHOLD,
             HIGH_MANA_THRESHOLD,
             MIN_LEVEL_FOR_SPELLS,
             MAX_COMMAND_LENGTH,
@@ -339,5 +367,4 @@ class TestDecisionEngine:
 
         assert ZERO == 0
         assert isinstance(LOW_HEALTH_THRESHOLD, int)
-        assert isinstance(HIGH_HEALTH_THRESHOLD, int)
         assert isinstance(MAX_COMMAND_LENGTH, int)

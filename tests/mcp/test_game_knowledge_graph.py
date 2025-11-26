@@ -281,3 +281,52 @@ def test_db():
     peewee_db.drop_tables([E, R, RX, NPC, Observation, Relation])
     peewee_db.close()
     Path(test_db_path).unlink()
+
+
+@pytest.mark.asyncio
+async def test_record_exit_skips_run_commands(knowledge_graph, test_db):
+    """Test that record_exit_success skips 'run' commands and chained commands."""
+    from mud_agent.db.models import Entity, Room, RoomExit
+
+    # Create rooms
+    from_entity = Entity.create(name="100", entity_type="Room")
+    to_entity = Entity.create(name="200", entity_type="Room")
+    from_room = Room.create(entity=from_entity, room_number=100)
+    to_room = Room.create(entity=to_entity, room_number=200)
+
+    # 1. Test 'run' command
+    await knowledge_graph.record_exit_success(
+        from_room_num=100,
+        to_room_num=200,
+        direction="north",
+        move_cmd="run 5n",
+        pre_cmds=[]
+    )
+    # Verify no exit created
+    assert RoomExit.select().count() == 0
+
+    # 2. Test chained command
+    await knowledge_graph.record_exit_success(
+        from_room_num=100,
+        to_room_num=200,
+        direction="north",
+        move_cmd="open door;north",
+        pre_cmds=[]
+    )
+    # Verify no exit created
+    assert RoomExit.select().count() == 0
+
+    # 3. Test valid command with 'run' in pre_cmds (should be filtered)
+    await knowledge_graph.record_exit_success(
+        from_room_num=100,
+        to_room_num=200,
+        direction="north",
+        move_cmd="north",
+        pre_cmds=["run setup", "unlock door"]
+    )
+    # Verify exit created
+    assert RoomExit.select().count() == 1
+    exit_obj = RoomExit.get()
+    details = exit_obj.get_command_details()
+    # 'run setup' should be filtered out
+    assert details["pre_commands"] == ["unlock door"]

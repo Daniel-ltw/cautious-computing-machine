@@ -15,6 +15,8 @@ def mock_agent():
     agent = MagicMock()
     agent.events = AsyncMock()
     agent.knowledge_graph = AsyncMock()
+    agent.state_manager = MagicMock()
+    agent.state_manager.room_num = None
     return agent
 
 
@@ -32,7 +34,7 @@ async def test_successful_move_records_exit(manager, mock_agent):
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
     # Simulate sending a movement command
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="north")
 
     # Simulate the room update event
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
@@ -52,8 +54,8 @@ async def test_move_with_valid_pre_command(manager, mock_agent):
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
     # Simulate pre-command and move command
-    await manager._handle_command_sent("open north")
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="open north")
+    await manager._handle_command_sent(command="north")
 
     # Simulate room update
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
@@ -72,8 +74,8 @@ async def test_move_with_invalid_pre_command(manager, mock_agent):
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
     # Simulate invalid pre-command and move command
-    await manager._handle_command_sent("open south")
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="open south")
+    await manager._handle_command_sent(command="north")
 
     # Simulate room update
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
@@ -92,8 +94,8 @@ async def test_directionless_move_with_pre_commands(manager, mock_agent):
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
     # Simulate pre-command and directionless move
-    await manager._handle_command_sent("unlock portal")
-    await manager._handle_command_sent("enter portal")
+    await manager._handle_command_sent(command="unlock portal")
+    await manager._handle_command_sent(command="enter portal")
 
     # Simulate room update
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
@@ -113,9 +115,9 @@ async def test_move_with_multiple_valid_pre_commands(manager, mock_agent):
     """Test that a move with multiple valid pre-commands is recorded correctly."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("unlock north")
-    await manager._handle_command_sent("open north")
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="unlock north")
+    await manager._handle_command_sent(command="open north")
+    await manager._handle_command_sent(command="north")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -133,9 +135,9 @@ async def test_move_with_mixed_pre_commands(manager, mock_agent):
     """Test that only valid pre-commands are recorded."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("unlock north")
-    await manager._handle_command_sent("open south")
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="unlock north")
+    await manager._handle_command_sent(command="open south")
+    await manager._handle_command_sent(command="north")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -152,9 +154,9 @@ async def test_directionless_move_with_multiple_pre_commands(manager, mock_agent
     """Test that multiple pre-commands are valid for directionless moves."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("unlock portal")
-    await manager._handle_command_sent("recite spell")
-    await manager._handle_command_sent("enter portal")
+    await manager._handle_command_sent(command="unlock portal")
+    await manager._handle_command_sent(command="recite spell")
+    await manager._handle_command_sent(command="enter portal")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -171,7 +173,7 @@ async def test_move_with_no_room_change(manager, mock_agent):
     """Test that an exit is not recorded if the room does not change."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="north")
 
     await manager._on_room_update(room_data={"num": 1, "name": "Starting Room"})
 
@@ -182,8 +184,8 @@ async def test_move_with_semicolon_chain_records_exit(manager, mock_agent):
     """Test that semicolon-chained commands record movement and pre-commands."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("open north")
-    await manager._handle_command_sent("north;look")
+    await manager._handle_command_sent(command="open north")
+    await manager._handle_command_sent(command="north;look")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -200,7 +202,7 @@ async def test_directionless_move_with_semicolon_chain(manager, mock_agent):
     """Test that portal enter in a chained command is captured."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("unlock portal; enter portal")
+    await manager._handle_command_sent(command="unlock portal; enter portal")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -217,8 +219,8 @@ async def test_climb_directionless_move_with_pre_commands(manager, mock_agent):
     """Test that 'climb' moves are captured with pre-commands."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("unlock rope")
-    await manager._handle_command_sent("climb rope")
+    await manager._handle_command_sent(command="unlock rope")
+    await manager._handle_command_sent(command="climb rope")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -236,7 +238,7 @@ async def test_say_triggers_force_exit_check(manager, mock_agent):
     import asyncio
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("say hello; enter portal")
+    await manager._handle_command_sent(command="say hello; enter portal")
     await asyncio.sleep(0)
 
     mock_agent.events.emit.assert_any_call("force_exit_check", command="say hello")
@@ -246,7 +248,7 @@ async def test_first_movement_in_chain_is_recorded(manager, mock_agent):
     """Test that only the first movement in a chain is captured."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("open north; north; east")
+    await manager._handle_command_sent(command="open north; north; east")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -263,8 +265,8 @@ async def test_board_directionless_move_with_pre_commands(manager, mock_agent):
     """Test that 'board' moves are captured with pre-commands."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("unlock ship")
-    await manager._handle_command_sent("board ship")
+    await manager._handle_command_sent(command="unlock ship")
+    await manager._handle_command_sent(command="board ship")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -281,7 +283,7 @@ async def test_escape_directionless_move_without_pre_commands(manager, mock_agen
     """Test that 'escape' moves are captured without pre-commands."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent("escape")
+    await manager._handle_command_sent(command="escape")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -361,7 +363,7 @@ async def test_force_exit_check_room_becomes_none(manager, mock_agent):
 async def test_room_update_with_incomplete_data(manager, mock_agent):
     """Test room update with missing 'num' field."""
     manager.current_room = {"num": 1, "name": "Room"}
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="north")
 
     # Room update with incomplete data should not crash
     await manager._on_room_update(room_data={"name": "Incomplete Room"})
@@ -373,7 +375,7 @@ async def test_room_update_with_incomplete_data(manager, mock_agent):
 async def test_room_update_with_none_data(manager, mock_agent):
     """Test room update with None as room data."""
     manager.current_room = {"num": 1, "name": "Room"}
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="north")
 
     # Room update with None should not crash
     await manager._on_room_update(room_data=None)
@@ -411,9 +413,9 @@ async def test_pre_commands_cleared_after_successful_move(manager, mock_agent):
     """Test that pre-commands are cleared after a successful move."""
     manager.current_room = {"num": 1, "name": "Room"}
 
-    await manager._handle_command_sent("unlock north")
-    await manager._handle_command_sent("open north")
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="unlock north")
+    await manager._handle_command_sent(command="open north")
+    await manager._handle_command_sent(command="north")
 
     # Verify pre-commands were set
     assert len(manager.pending_pre_commands) > 0
@@ -431,8 +433,8 @@ async def test_pre_commands_persist_on_failed_move(manager, mock_agent):
     """Test that pre-commands persist when move fails (room doesn't change)."""
     manager.current_room = {"num": 1, "name": "Room"}
 
-    await manager._handle_command_sent("unlock north")
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="unlock north")
+    await manager._handle_command_sent(command="north")
 
     initial_pre_cmds = manager.pending_pre_commands.copy()
 
@@ -448,10 +450,10 @@ async def test_multiple_pre_commands_same_direction(manager, mock_agent):
     """Test multiple pre-commands for the same direction."""
     manager.current_room = {"num": 1, "name": "Room"}
 
-    await manager._handle_command_sent("unlock north")
-    await manager._handle_command_sent("open north")
-    await manager._handle_command_sent("kick north")
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="unlock north")
+    await manager._handle_command_sent(command="open north")
+    await manager._handle_command_sent(command="kick north")
+    await manager._handle_command_sent(command="north")
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
@@ -467,7 +469,7 @@ async def test_exception_in_record_exit_success_handled(manager, mock_agent):
     # Make record_exit_success raise an exception
     mock_agent.knowledge_graph.record_exit_success.side_effect = Exception("Database error")
 
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="north")
 
     # Should not crash even if record_exit_success fails
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
@@ -481,11 +483,11 @@ async def test_non_movement_command_clears_pending_exit(manager, mock_agent):
     """Test that non-movement commands clear pending exit."""
     manager.current_room = {"num": 1, "name": "Room"}
 
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="north")
     assert manager.pending_exit_command == "north"
 
     # Send non-movement command
-    await manager._handle_command_sent("look")
+    await manager._handle_command_sent(command="look")
 
     # Room update should not record exit
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
@@ -502,7 +504,7 @@ async def test_all_cardinal_directions(manager, mock_agent):
         manager.current_room = {"num": 1, "name": "Room"}
         mock_agent.knowledge_graph.record_exit_success.reset_mock()
 
-        await manager._handle_command_sent(direction)
+        await manager._handle_command_sent(command=direction)
         await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
         mock_agent.knowledge_graph.record_exit_success.assert_called_once()
@@ -525,7 +527,7 @@ async def test_all_directionless_commands(manager, mock_agent):
         manager.current_room = {"num": 1, "name": "Room"}
         mock_agent.knowledge_graph.record_exit_success.reset_mock()
 
-        await manager._handle_command_sent(command)
+        await manager._handle_command_sent(command=command)
         await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
         mock_agent.knowledge_graph.record_exit_success.assert_called_once()
@@ -567,13 +569,13 @@ async def test_rapid_room_changes(manager, mock_agent):
     """Test rapid sequence of room changes."""
     manager.current_room = {"num": 1, "name": "Room 1"}
 
-    await manager._handle_command_sent("north")
+    await manager._handle_command_sent(command="north")
     await manager._on_room_update(room_data={"num": 2, "name": "Room 2"})
 
-    await manager._handle_command_sent("east")
+    await manager._handle_command_sent(command="east")
     await manager._on_room_update(room_data={"num": 3, "name": "Room 3"})
 
-    await manager._handle_command_sent("south")
+    await manager._handle_command_sent(command="south")
     await manager._on_room_update(room_data={"num": 4, "name": "Room 4"})
 
     # Should have recorded 3 exits

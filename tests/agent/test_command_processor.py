@@ -17,7 +17,9 @@ class TestCommandProcessor:
         """Set up test fixtures."""
         self.agent = MagicMock()
         self.room_manager = MagicMock()
+        self.agent.room_manager = self.room_manager
         self.room_manager._handle_command_sent = AsyncMock()
+        self.room_manager._get_current_room_num = MagicMock(return_value=None)
         self.agent.mud_tool = MagicMock()
         self.agent.mud_tool.forward = AsyncMock(return_value="Test response")
         self.agent.events = MagicMock()
@@ -47,7 +49,7 @@ class TestCommandProcessor:
 
         assert result == "Test response"
         self.agent.mud_tool.forward.assert_called_once_with("north", is_user_command=False)
-        self.room_manager._handle_command_sent.assert_called_once_with("north")
+        # Direct call to room_manager removed, event emission handles it now
 
     @pytest.mark.asyncio
     async def test_process_command_user_command_flag(self):
@@ -62,7 +64,7 @@ class TestCommandProcessor:
         """Test that command_sent event is emitted."""
         await self.processor.process_command("south")
 
-        self.agent.events.emit.assert_called_with("command_sent", "south")
+        self.agent.events.emit.assert_called_with("command_sent", command="south", from_room_num=None)
 
     @pytest.mark.asyncio
     async def test_process_command_stores_last_command(self):
@@ -211,11 +213,14 @@ class TestCommandProcessor:
             assert mock_sleep.called
 
     @pytest.mark.asyncio
-    async def test_room_manager_receives_command(self):
-        """Test that room manager receives command notification."""
+    async def test_captures_room_num_before_event(self):
+        """Test that room number is captured and passed to event."""
+        self.room_manager._get_current_room_num.return_value = 12345
+
         await self.processor.process_command("north")
 
-        self.room_manager._handle_command_sent.assert_called_once_with("north")
+        self.room_manager._get_current_room_num.assert_called()
+        self.agent.events.emit.assert_called_with("command_sent", command="north", from_room_num=12345)
 
     @pytest.mark.asyncio
     async def test_queued_commands_processing(self):

@@ -54,7 +54,7 @@ class TestStateManager:
         # Verify event emission
         state_manager.events.emit.assert_called()
         call_args = state_manager.events.emit.call_args
-        assert call_args[0][0] == "character_update"
+        assert call_args[0][0] == "state_update"
         assert call_args[0][1]["character_name"] == "Hero"
 
     def test_update_vitals(self, state_manager):
@@ -159,7 +159,8 @@ class TestStateManager:
         assert state_manager.hunger_current == 20
         assert state_manager.thirst_current == 10
 
-    def test_update_room_info_gmcp(self, state_manager):
+    @pytest.mark.asyncio
+    async def test_update_room_info_gmcp(self, state_manager):
         """Test updating room info from GMCP manager."""
         gmcp_manager = MagicMock()
         gmcp_manager.get_all_character_data.return_value = {}
@@ -184,7 +185,8 @@ class TestStateManager:
         # Verify event emission
         calls = [call for call in state_manager.events.emit.mock_calls if call.args[0] == "room_update"]
         assert len(calls) > 0
-        room_data = calls[0].args[1]
+        # Event is emitted with **room_info, so data is in kwargs
+        room_data = calls[0].kwargs
         assert room_data["name"] == "Town Square"
 
     def test_handle_state_update(self, state_manager):

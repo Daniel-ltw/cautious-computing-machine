@@ -106,7 +106,7 @@ class VitalsContainer(Container):
         if self.hp_widget is None:
             try:
                 self.hp_widget = self.query_one("#hp-widget")
-                logger.info("Found hp widget via query in on_mount")
+                logger.debug("Found hp widget via query in on_mount")
 
                 # Ensure the widget is visible
                 self.hp_widget.styles.display = "block"
@@ -146,7 +146,7 @@ class VitalsContainer(Container):
         if self.mp_widget is None:
             try:
                 self.mp_widget = self.query_one("#mp-widget")
-                logger.info("Found mp widget via query in on_mount")
+                logger.debug("Found mp widget via query in on_mount")
 
                 # Ensure the widget is visible
                 self.mp_widget.styles.display = "block"
@@ -186,7 +186,7 @@ class VitalsContainer(Container):
         if self.mv_widget is None:
             try:
                 self.mv_widget = self.query_one("#mv-widget")
-                logger.info("Found mv widget via query in on_mount")
+                logger.debug("Found mv widget via query in on_mount")
 
                 # Ensure the widget is visible
                 self.mv_widget.styles.display = "block"
@@ -531,7 +531,7 @@ class StatusContainer(Container):
                 # Try to find the character header widget
                 try:
                     self.character_header = self.query_one("#character-header")
-                    logger.info("Found character header widget via query")
+                    logger.debug("Found character header widget via query")
                 except Exception as e:
                     logger.error(
                         f"Failed to find character header widget: {e}", exc_info=True
@@ -932,7 +932,7 @@ class StatusContainer(Container):
                     # Try to find the vitals container
                     try:
                         self.vitals_container = self.query_one("#vitals-container")
-                        logger.info("Found vitals container via query")
+                        logger.debug("Found vitals container via query")
                     except Exception as e:
                         logger.error(
                             f"Failed to find vitals container: {e}", exc_info=True
@@ -976,7 +976,7 @@ class StatusContainer(Container):
                             self.vitals_container.hp_widget = (
                                 self.vitals_container.query_one("#hp-widget")
                             )
-                            logger.info("Found hp widget via query")
+                            logger.debug("Found hp widget via query")
                         except Exception as e:
                             logger.error(
                                 f"Failed to find hp widget: {e}", exc_info=True
@@ -988,7 +988,7 @@ class StatusContainer(Container):
                             self.vitals_container.mp_widget = (
                                 self.vitals_container.query_one("#mp-widget")
                             )
-                            logger.info("Found mp widget via query")
+                            logger.debug("Found mp widget via query")
                         except Exception as e:
                             logger.error(
                                 f"Failed to find mp widget: {e}", exc_info=True
@@ -1000,7 +1000,7 @@ class StatusContainer(Container):
                             self.vitals_container.mv_widget = (
                                 self.vitals_container.query_one("#mv-widget")
                             )
-                            logger.info("Found mv widget via query")
+                            logger.debug("Found mv widget via query")
                         except Exception as e:
                             logger.error(
                                 f"Failed to find mv widget: {e}", exc_info=True
@@ -1388,7 +1388,7 @@ class StatusContainer(Container):
                     # Try to find the worth container
                     try:
                         self.worth_container = self.query_one("#worth-container")
-                        logger.info("Found worth container via query")
+                        logger.debug("Found worth container via query")
                     except Exception as e:
                         logger.error(
                             f"Failed to find worth container: {e}", exc_info=True
@@ -1412,7 +1412,7 @@ class StatusContainer(Container):
                         self.worth_container.gold_widget = (
                             self.worth_container.query_one("#gold-widget")
                         )
-                        logger.info("Found gold widget via query")
+                        logger.debug("Found gold widget via query")
                     except Exception as e:
                         logger.error(f"Failed to find gold widget: {e}", exc_info=True)
                         return
@@ -1422,7 +1422,7 @@ class StatusContainer(Container):
                         self.worth_container.bank_widget = (
                             self.worth_container.query_one("#bank-widget")
                         )
-                        logger.info("Found bank widget via query")
+                        logger.debug("Found bank widget via query")
                     except Exception as e:
                         logger.error(f"Failed to find bank widget: {e}", exc_info=True)
                         return
@@ -1432,7 +1432,7 @@ class StatusContainer(Container):
                         self.worth_container.qp_widget = self.worth_container.query_one(
                             "#qp-widget"
                         )
-                        logger.info("Found qp widget via query")
+                        logger.debug("Found qp widget via query")
                     except Exception as e:
                         logger.error(f"Failed to find qp widget: {e}", exc_info=True)
                         return
@@ -1442,7 +1442,7 @@ class StatusContainer(Container):
                         self.worth_container.tp_widget = self.worth_container.query_one(
                             "#tp-widget"
                         )
-                        logger.info("Found tp widget via query")
+                        logger.debug("Found tp widget via query")
                     except Exception as e:
                         logger.error(f"Failed to find tp widget: {e}", exc_info=True)
                         return
@@ -1452,7 +1452,7 @@ class StatusContainer(Container):
                         self.worth_container.xp_widget = self.worth_container.query_one(
                             "#xp-widget"
                         )
-                        logger.info("Found xp widget via query")
+                        logger.debug("Found xp widget via query")
                     except Exception as e:
                         logger.error(f"Failed to find xp widget: {e}", exc_info=True)
                         return
@@ -1505,7 +1505,7 @@ class StatusContainer(Container):
                     # Try to find the stats container
                     try:
                         self.stats_container = self.query_one("#stats-container")
-                        logger.info("Found stats container via query")
+                        logger.debug("Found stats container via query")
                     except Exception as e:
                         logger.error(
                             f"Failed to find stats container: {e}", exc_info=True
@@ -1540,7 +1540,7 @@ class StatusContainer(Container):
                                 self.stats_container.str_widget = (
                                     self.stats_container.query_one("#str-widget")
                                 )
-                                logger.info("Found str widget via query")
+                                logger.debug("Found str widget via query")
                             except Exception as e:
                                 logger.error(
                                     f"Failed to find str widget: {e}", exc_info=True
@@ -1552,7 +1552,7 @@ class StatusContainer(Container):
                                 self.stats_container.int_widget = (
                                     self.stats_container.query_one("#int-widget")
                                 )
-                                logger.info("Found int widget via query")
+                                logger.debug("Found int widget via query")
                             except Exception as e:
                                 logger.error(
                                     f"Failed to find int widget: {e}", exc_info=True
@@ -1564,7 +1564,7 @@ class StatusContainer(Container):
                                 self.stats_container.wis_widget = (
                                     self.stats_container.query_one("#wis-widget")
                                 )
-                                logger.info("Found wis widget via query")
+                                logger.debug("Found wis widget via query")
                             except Exception as e:
                                 logger.error(
                                     f"Failed to find wis widget: {e}", exc_info=True
@@ -1576,7 +1576,7 @@ class StatusContainer(Container):
                                 self.stats_container.dex_widget = (
                                     self.stats_container.query_one("#dex-widget")
                                 )
-                                logger.info("Found dex widget via query")
+                                logger.debug("Found dex widget via query")
                             except Exception as e:
                                 logger.error(
                                     f"Failed to find dex widget: {e}", exc_info=True
@@ -1588,7 +1588,7 @@ class StatusContainer(Container):
                                 self.stats_container.con_widget = (
                                     self.stats_container.query_one("#con-widget")
                                 )
-                                logger.info("Found con widget via query")
+                                logger.debug("Found con widget via query")
                             except Exception as e:
                                 logger.error(
                                     f"Failed to find con widget: {e}", exc_info=True
@@ -1600,7 +1600,7 @@ class StatusContainer(Container):
                                 self.stats_container.luck_widget = (
                                     self.stats_container.query_one("#luck-widget")
                                 )
-                                logger.info("Found luck widget via query")
+                                logger.debug("Found luck widget via query")
                             except Exception as e:
                                 logger.error(
                                     f"Failed to find luck widget: {e}", exc_info=True
@@ -1612,7 +1612,7 @@ class StatusContainer(Container):
                                 self.stats_container.hr_widget = (
                                     self.stats_container.query_one("#hr-widget")
                                 )
-                                logger.info("Found hr widget via query")
+                                logger.debug("Found hr widget via query")
                             except Exception as e:
                                 logger.error(
                                     f"Failed to find hr widget: {e}", exc_info=True
@@ -1624,7 +1624,7 @@ class StatusContainer(Container):
                                 self.stats_container.dr_widget = (
                                     self.stats_container.query_one("#dr-widget")
                                 )
-                                logger.info("Found dr widget via query")
+                                logger.debug("Found dr widget via query")
                             except Exception as e:
                                 logger.error(
                                     f"Failed to find dr widget: {e}", exc_info=True
@@ -1798,7 +1798,7 @@ class StatusContainer(Container):
                     # Try to find the status effects widget
                     try:
                         self.status_effects = self.query_one("#status-effects-widget")
-                        logger.info("Found status effects widget via query")
+                        logger.debug("Found status effects widget via query")
                     except Exception as e:
                         logger.error(
                             f"Failed to find status effects widget: {e}", exc_info=True

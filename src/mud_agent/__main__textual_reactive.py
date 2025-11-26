@@ -113,6 +113,10 @@ async def connect_and_initialize(agent, character_name, password, config):
     This function runs as a background task while the loading screen is displayed.
     """
     try:
+        # Set up managers (including room_manager event subscriptions)
+        await agent.setup_managers()
+        logger.info("Agent managers initialized")
+
         # Connect to the MUD server
         connect_result = await agent.connect_to_mud()
         # Check if connect_result is a string and contains "Failed"

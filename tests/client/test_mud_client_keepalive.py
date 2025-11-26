@@ -16,7 +16,7 @@ class TestMudClientKeepAlive:
 
     def test_keep_alive_interval_constant(self):
         """Test that KEEP_ALIVE_INTERVAL is set to 30 seconds."""
-        assert KEEP_ALIVE_INTERVAL == 30.0, "Keep-alive interval should be 30 seconds"
+        assert KEEP_ALIVE_INTERVAL == 10.0, "Keep-alive interval should be 10 seconds"
 
     def test_keep_alive_timeout_constant(self):
         """Test that KEEP_ALIVE_TIMEOUT is set to 180 seconds."""

@@ -57,7 +57,6 @@ class CommandProcessor:
             str: The response from the MUD server
         """
         try:
-        try:
             # Capture the current room number BEFORE sending the command to avoid race condition
             # where GMCP updates arrive before the command_sent handler runs
             from_room_num = None

@@ -303,6 +303,15 @@ class GameKnowledgeGraph:
         pre_cmds: list[str] | None = None,
     ) -> None:
         """Records a successful exit from one room to another."""
+        # Skip recording for commands that are runs or chained (contain ';')
+        if move_cmd.strip().lower().startswith('run') or ';' in move_cmd:
+            self.logger.debug(f"Skipping exit recording for disallowed move command: {move_cmd}")
+            return
+
+        # Filter pre_commands to exclude run or chained commands
+        if pre_cmds:
+            pre_cmds = [cmd for cmd in pre_cmds if not (cmd.strip().lower().startswith('run') or ';' in cmd)]
+
         if not self._initialized:
             try:
                 await self.initialize()
@@ -371,7 +380,7 @@ class GameKnowledgeGraph:
                          exit_obj = ex
                          break
 
-                self.logger.info(
+                self.logger.debug(
                     f"Recording exit success: {from_room_num} -> {to_room_num} ({direction} -> {dir_key})"
                     f" with move command '{move_cmd}'"
                     f" pre-commands: {pre_cmds}"
@@ -396,7 +405,7 @@ class GameKnowledgeGraph:
                             return
 
 
-                self.logger.warning(f"Found existing exit {dir_in} -> {to_room_num}. Updating it with new command.")
+                self.logger.debug(f"Found existing exit {dir_in} -> {to_room_num}. Updating it with new command.")
                 exit_obj.to_room = to_room
                 exit_obj.to_room_number = to_room_num
                 exit_obj.save()

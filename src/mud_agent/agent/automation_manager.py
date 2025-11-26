@@ -221,7 +221,7 @@ class AutomationManager:
                 success = await self.agent.find_questor()
 
                 if success:
-                    self.logger.info("Found questor, switching to requesting quest")
+                    self.logger.debug("Found questor, switching to requesting quest")
                     self.quest_state = "requesting_quest"
                     return "look"  # Look around to confirm we're in the right place
                 else:

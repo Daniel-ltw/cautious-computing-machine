@@ -21,6 +21,7 @@ class RoomManager:
         self.previous_room_num: int | None = None  # Track the last known room number before an update
         # Commands that should be executed before movement (e.g., opening/unlocking doors)
         self.pending_pre_commands: set[str] = set()
+        self.pending_exit_command: str | None = None  # The current pending movement command
         self.from_room_num_on_exit: int | None = None
         self.current_room: dict | None = None
         self.current_exits: dict | None = {}
@@ -178,7 +179,7 @@ class RoomManager:
 
     async def _on_room_update(self, **kwargs):
         """Handles the room_update event from the StateManager."""
-        self.logger.info(f"🔔 _on_room_update called with kwargs keys: {list(kwargs.keys())}")
+        self.logger.debug(f"🔔 _on_room_update called with kwargs keys: {list(kwargs.keys())}")
 
         room_data = kwargs.get("room_data", kwargs)
         if not room_data or not room_data.get("num"):
@@ -205,7 +206,7 @@ class RoomManager:
         except Exception:
             self.logger.exception("Error adding room entity to knowledge graph")
 
-        self.logger.info(f"Room data received: num={room_data.get('num')}, name={room_data.get('name', 'N/A')}")
+        self.logger.debug(f"Room data received: num={room_data.get('num')}, name={room_data.get('name', 'N/A')}")
 
         try:
             incoming_room_num = room_data.get("num")
