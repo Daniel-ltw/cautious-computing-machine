@@ -329,7 +329,12 @@ class CommandProcessor:
         while True:
             if not self.auto_spellup:
                 return
+
+            # Use configured autocast commands or fallback to default
             skills_spells = ["nimble", "hide", "sneak", "cast under"]
+            if hasattr(self.agent, "config") and hasattr(self.agent.config, "agent"):
+                skills_spells = self.agent.config.agent.autocast_commands
+
             for cmd in skills_spells:
                 await self.agent.send_command(cmd)
             await asyncio.sleep(random.uniform(15.0, 60.0))

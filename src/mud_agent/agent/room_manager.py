@@ -103,16 +103,16 @@ class RoomManager:
             # where GMCP updates arrive before we can read the current room
             if from_room_num_captured is not None:
                 from_room_num = from_room_num_captured
-                self.logger.info(f"Using captured from_room_num={from_room_num} (before GMCP update)")
+                self.logger.debug(f"Using captured from_room_num={from_room_num} (before GMCP update)")
             else:
                 from_room_num = self._get_current_room_num()
                 self.logger.warning(f"No captured from_room_num, falling back to _get_current_room_num()={from_room_num}")
 
             self.from_room_num_on_exit = from_room_num
-            self.logger.info(
+            self.logger.debug(
                 f"✓ Movement command `{self.pending_exit_command}` detected from room {from_room_num}."
             )
-            self.logger.info(
+            self.logger.debug(
                 f"  current_room data: {self.current_room.get('num') if self.current_room else 'None'}, "
                 f"state_manager.room_num: {self.agent.state_manager.room_num if hasattr(self.agent, 'state_manager') else 'N/A'}"
             )
@@ -220,7 +220,7 @@ class RoomManager:
             if self.pending_exit_command:
                 # This is the key logic: only act if the room number has actually changed.
                 if previous_room_num_on_exit is not None and previous_room_num_on_exit != incoming_room_num:
-                    self.logger.warning(
+                    self.logger.debug(
                         f"Successful move detected. Recording exit: from {previous_room_num_on_exit} to {incoming_room_num} "
                         f"cmd='{self.pending_exit_command}' pre_cmds={self.pending_pre_commands}"
                     )

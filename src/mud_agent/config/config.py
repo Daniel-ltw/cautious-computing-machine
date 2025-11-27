@@ -120,6 +120,45 @@ class GMCPConfig:
 
 
 @dataclass
+class AgentConfig:
+    """Configuration for the agent behavior."""
+
+    autocast_commands: list[str]
+
+    def __init__(self, autocast_commands: list[str] | None = None):
+        self.autocast_commands = autocast_commands or ["nimble", "hide", "sneak", "cast under"]
+
+    @classmethod
+    def from_env(cls) -> "AgentConfig":
+        """Create an AgentConfig from environment variables.
+
+        Returns:
+            AgentConfig: A new AgentConfig instance.
+        """
+        autocast_env = os.getenv("AUTOCAST_COMMANDS")
+        if autocast_env:
+            # Split by comma and strip whitespace
+            commands = [cmd.strip() for cmd in autocast_env.split(",") if cmd.strip()]
+            return cls(autocast_commands=commands)
+        return cls()
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any]) -> "AgentConfig":
+        """Create an AgentConfig from a dictionary.
+
+        Args:
+            config: Dictionary containing agent configuration.
+
+        Returns:
+            AgentConfig: A new AgentConfig instance.
+        """
+        return cls(
+            autocast_commands=config.get("autocast_commands"),
+        )
+
+
+
+@dataclass
 class Config:
     """Main configuration class."""
 
@@ -127,6 +166,7 @@ class Config:
     mud: MUDConfig
     log: LogConfig
     gmcp: GMCPConfig
+    agent: AgentConfig
 
     @classmethod
     def load(cls) -> "Config":
@@ -139,7 +179,8 @@ class Config:
             model=ModelConfig(),
             mud=MUDConfig.from_env(),
             log=LogConfig.from_env(),
-            gmcp=GMCPConfig.from_env()
+            gmcp=GMCPConfig.from_env(),
+            agent=AgentConfig.from_env(),
         )
 
     @classmethod
@@ -157,4 +198,5 @@ class Config:
             mud=MUDConfig.from_env(),  # Always load MUD config from env for security
             log=LogConfig.from_env(),
             gmcp=GMCPConfig.from_dict(config.get("gmcp", {})),
+            agent=AgentConfig.from_dict(config.get("agent", {})),
         )
