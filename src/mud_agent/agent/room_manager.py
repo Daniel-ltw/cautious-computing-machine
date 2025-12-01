@@ -50,14 +50,18 @@ class RoomManager:
         self.logger.warning("_get_current_room_num: No room number available from any source!")
         return None
 
-    async def _handle_command_sent(self, **kwargs) -> None:
+    async def _handle_command_sent(self, *args, **kwargs) -> None:
         """Handle the command_sent event.
 
         Args:
-            **kwargs: Event data, may contain 'command' and 'from_room_num'
+            *args: Positional arguments, first may be the command string.
+            **kwargs: Event data, may contain 'command' and 'from_room_num'.
         """
-        # Support both old format (positional command arg) and new format (kwargs)
-        command = kwargs.get('command', kwargs.get('0'))  # '0' for backward compat with positional
+        # Determine command from positional args or kwargs for backward compatibility
+        if args and isinstance(args[0], str):
+            command = args[0]
+        else:
+            command = kwargs.get('command')
         from_room_num_captured = kwargs.get('from_room_num')
 
         if not command:
@@ -72,7 +76,7 @@ class RoomManager:
             "n", "s", "e", "w", "u", "d",
             "north", "south", "east", "west", "up", "down",
         ]
-        startswith_commands = ["enter ", "board", "escape", "climb"]
+        startswith_commands = ["escape"]
         pre_command_verbs = [
             "open", "unlock", "pick", "bash", "break", "kick", "force", "unbar", "unlatch",
         ]
@@ -124,9 +128,20 @@ class RoomManager:
             # Check if it's a pre-command (already handled above)
             is_pre_command = any(cmd_lower.startswith(v) for v in pre_command_verbs)
             if not is_pre_command:
-                # Trigger force exit check to catch any unrecognized movement commands
-                self.logger.debug(f"Command '{cmd_lower}' not recognized - triggering force exit check")
-                asyncio.create_task(self.events.emit("force_exit_check", command=cmd_lower))
+                # Only trigger force exit check for whitelisted commands
+                # This prevents accidental exit recording from commands like "look", "inventory", or typos
+                implicit_exit_verbs = [
+                    "enter ", "board", "climb", "crawl", "leave", "descend", "ascend", "give "
+                ]
+                is_allowed_implicit = any(cmd_lower.startswith(v) for v in implicit_exit_verbs)
+
+                if is_allowed_implicit:
+                    # Trigger force exit check to catch any unrecognized movement commands
+                    self.logger.debug(f"Command '{cmd_lower}' recognized as potential implicit exit - triggering force exit check")
+                    await self.events.emit("force_exit_check", command=cmd_lower)
+                else:
+                    self.logger.debug(f"Command '{cmd_lower}' not in implicit exit whitelist - ignoring")
+
             self.pending_exit_command = None
 
     async def _handle_force_exit_check(self, command: str) -> None:

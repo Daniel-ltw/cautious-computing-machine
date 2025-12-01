@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from peewee import DoesNotExist, fn
+from peewee import DoesNotExist, IntegrityError, fn
 
 from ..db.migrate_db import DatabaseMigrator
 from ..db.models import (
@@ -294,6 +294,20 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving rooms with unexplored exits for area '{area_name}': {e}", exc_info=True)
             return []
 
+    # Mapping for direction normalization
+    DIRECTION_MAPPING = {
+        "n": "north", "north": "north",
+        "s": "south", "south": "south",
+        "e": "east", "east": "east",
+        "w": "west", "west": "west",
+        "u": "up", "up": "up",
+        "d": "down", "down": "down",
+        "ne": "northeast", "northeast": "northeast",
+        "nw": "northwest", "northwest": "northwest",
+        "se": "southeast", "southeast": "southeast",
+        "sw": "southwest", "southwest": "southwest",
+    }
+
     async def record_exit_success(
         self,
         from_room_num: int,
@@ -304,8 +318,34 @@ class GameKnowledgeGraph:
     ) -> None:
         """Records a successful exit from one room to another."""
         # Skip recording for commands that are runs or chained (contain ';')
-        if move_cmd.strip().lower().startswith('run') or ';' in move_cmd:
+        if move_cmd.strip().lower().startswith('run') or direction.strip().lower().startswith('run') or ';' in direction or ';' in move_cmd:
             self.logger.debug(f"Skipping exit recording for disallowed move command: {move_cmd}")
+            return
+
+        # Skip recording for simple 'enter' command as it is ambiguous
+        if move_cmd.strip().lower() == 'enter':
+            self.logger.debug(f"Skipping exit recording for ambiguous move command: {move_cmd}")
+            return
+
+        # Skip recording for 'scan' command as it is not a movement command
+        if move_cmd.strip().lower() == 'scan':
+            self.logger.debug(f"Skipping exit recording for non-movement command: {move_cmd}")
+            return
+
+        # Skip recording for 'where' command as it is not a movement command
+        if 'where' in move_cmd.strip().lower():
+            self.logger.debug(f"Skipping exit recording for non-movement command: {move_cmd}")
+            return
+
+        # Validate that move_cmd direction matches exit direction if both are standard directions
+        normalized_move = self.DIRECTION_MAPPING.get(move_cmd.strip().lower())
+        normalized_dir = self.DIRECTION_MAPPING.get(direction.strip().lower())
+
+        if normalized_move and normalized_dir and normalized_move != normalized_dir:
+            self.logger.debug(
+                f"Skipping exit recording due to direction mismatch: "
+                f"move_cmd='{move_cmd}' ({normalized_move}) != direction='{direction}' ({normalized_dir})"
+            )
             return
 
         # Filter pre_commands to exclude run or chained commands
@@ -390,14 +430,39 @@ class GameKnowledgeGraph:
                 is_fallback = False
                 if exit_obj is None:
                     try:
-                        exit_obj = self.get_or_create_exit(from_room, dir_in, to_room_number=to_room_num)
+                        exit_obj = self.get_or_create_exit(from_room, dir_in, to_room=to_room, to_room_number=to_room_num)
                     except Exception as e:
                         self.logger.warning(f"Failed to get_or_create_exit for {dir_in}: {e}. Trying fallback.")
                         for ex in from_room.exits:
                             if ex.to_room_number == to_room_num:
+                                # Check if we should update the existing exit
+                                # Don't overwrite if the new command is ignored (scan, enter, etc)
+                                # or if the existing command is specific and the new one is generic
+                                should_update = True
+                                new_cmd_lower = move_cmd.strip().lower()
+
+                                # List of commands that should never overwrite an existing exit
+                                ignored_overwrite_cmds = ['scan', 'enter', 'look']
+                                if new_cmd_lower in ignored_overwrite_cmds:
+                                    should_update = False
+                                    self.logger.debug(f"Fallback: Not updating exit with ignored command '{move_cmd}'")
+
                                 exit_obj = ex
                                 is_fallback = True
-                                self.logger.info(f"Fallback: Found existing exit to {to_room_num} ({ex.direction}). Updating it with new command.")
+
+                                if should_update:
+                                    self.logger.info(f"Fallback: Found existing exit to {to_room_num} ({ex.direction}). Updating it with new command.")
+                                else:
+                                    self.logger.info(f"Fallback: Found existing exit to {to_room_num} ({ex.direction}). Keeping existing command.")
+                                    # Set move_cmd to the existing one so we don't overwrite it later
+                                    if ex.command_details:
+                                        import json
+                                        try:
+                                            details = json.loads(ex.command_details)
+                                            if details.get('move_command'):
+                                                move_cmd = details.get('move_command')
+                                        except:
+                                            pass
                                 break
 
                         if not is_fallback:

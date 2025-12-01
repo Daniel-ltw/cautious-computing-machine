@@ -37,7 +37,16 @@ class CommandProcessor:
             str: The response from the MUD server
         """
         try:
-            return await self._process_single_command(command, is_user_command)
+            if ";" in command:
+                # Split by semicolon, respecting that some might be empty if multiple ; are used
+                sub_commands = [cmd.strip() for cmd in command.split(";") if cmd.strip()]
+                responses = []
+                for sub_cmd in sub_commands:
+                    response = await self._process_single_command(sub_cmd, is_user_command)
+                    responses.append(response)
+                return "\n".join(responses)
+            else:
+                return await self._process_single_command(command, is_user_command)
 
         except Exception as e:
             error_msg = f"Error processing command: {e}"
