@@ -131,18 +131,31 @@ class RoomManager:
                 # Only trigger force exit check for whitelisted commands
                 # This prevents accidental exit recording from commands like "look", "inventory", or typos
                 implicit_exit_verbs = [
-                    "enter ", "board", "climb", "crawl", "leave", "descend", "ascend", "give "
+                    "enter ", "board", "climb", "crawl", "leave", "descend", "ascend", "give ", "kill ", "push ", "catch "
                 ]
                 is_allowed_implicit = any(cmd_lower.startswith(v) for v in implicit_exit_verbs)
 
                 if is_allowed_implicit:
                     # Trigger force exit check to catch any unrecognized movement commands
                     self.logger.debug(f"Command '{cmd_lower}' recognized as potential implicit exit - triggering force exit check")
+
+                    # Set pending exit command so _on_room_update can handle it immediately if a room update arrives
+                    self.pending_exit_command = cmd_lower
+
+                    # Ensure from_room_num is available
+                    if from_room_num_captured is not None:
+                        from_room_num = from_room_num_captured
+                    else:
+                        from_room_num = self._get_current_room_num()
+
+                    self.from_room_num_on_exit = from_room_num
+
                     await self.events.emit("force_exit_check", command=cmd_lower)
                 else:
                     self.logger.debug(f"Command '{cmd_lower}' not in implicit exit whitelist - ignoring")
-
-            self.pending_exit_command = None
+                    # Do NOT clear pending_exit_command here. If the user types "look" or another command
+                    # while waiting for the room update, we don't want to cancel the pending exit.
+                    # It will be cleared by _on_room_update (if successful) or _handle_force_exit_check (timeout).
 
     async def _handle_force_exit_check(self, command: str) -> None:
         """Wait and check if a room change occurred after a command."""
@@ -153,6 +166,11 @@ class RoomManager:
 
         self.logger.debug(f"Force exit check: waiting 2s to detect room change after '{command}' from room {from_room_num}")
         await asyncio.sleep(2.0)
+
+        # Check if the pending command was already handled (cleared) by _on_room_update
+        if self.pending_exit_command != command:
+            self.logger.debug(f"Force exit check: pending command '{self.pending_exit_command}' != '{command}', assuming handled or superseded.")
+            return
 
         new_room_num = self._get_current_room_num()
         if new_room_num and new_room_num != from_room_num:
@@ -172,8 +190,10 @@ class RoomManager:
             # Clear pre-commands after recording
             self.pending_pre_commands.clear()
             self.from_room_num_on_exit = None
+            self.pending_exit_command = None
         else:
-            self.logger.debug(f"No room change detected after '{command}' (from: {from_room_num}, after: {new_room_num})")
+            self.logger.debug(f"No room change detected after '{command}' (from: {from_room_num}, after: {new_room_num}). Clearing pending command.")
+            self.pending_exit_command = None
 
     def _get_direction_from_command(self, command: str) -> str | None:
         """Extracts a direction from a command string."""
