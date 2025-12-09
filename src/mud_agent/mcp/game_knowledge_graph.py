@@ -411,12 +411,17 @@ class GameKnowledgeGraph:
 
                     # Direct match
                     if stored_norm == dir_key:
+                        # Verify destination if known to avoid collisions (e.g. "enter hut" vs "enter portal")
+                        if ex.to_room_number is not None and ex.to_room_number != to_room_num:
+                            continue
                         exit_obj = ex
                         break
 
                     # Check if the command contains the stored direction (e.g. "enter portal" matches "portal")
                     # This handles cases where the exit is named "portal" but the command is "enter portal"
                     if dir_in.endswith(stored) and len(stored) > 2: # Ensure stored isn't just a short direction like 'n'
+                         if ex.to_room_number is not None and ex.to_room_number != to_room_num:
+                            continue
                          exit_obj = ex
                          break
 

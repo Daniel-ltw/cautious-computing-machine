@@ -267,10 +267,10 @@ class RoomManager:
                             if pre_cmd_direction and pre_cmd_direction == move_direction:
                                 valid_pre_commands.append(pre_cmd)
                             else:
-                                self.logger.warning("Invalid pre-command '{pre_cmd}' does not match move direction '{move_direction}'.")
+                                self.logger.warning(f"Invalid pre-command '{pre_cmd}' does not match move direction '{move_direction}'.")
                     else:
                         # Directionless move command (e.g., enter portal) - all pre-commands are valid
-                        self.logger.info("Directionless move command '{self.pending_exit_command}' detected. All pre-commands are valid.")
+                        self.logger.info(f"Directionless move command '{self.pending_exit_command}' detected. All pre-commands are valid.")
                         valid_pre_commands = list(self.pending_pre_commands)
 
                     try:
@@ -289,8 +289,14 @@ class RoomManager:
                         self.from_room_num_on_exit = None
                         self.pending_pre_commands.clear()
 
-                elif previous_room_num_on_exit is not None and previous_room_num_on_exit == incoming_room_num:
+                else:
+                    # This covers the case where previous_room_num_on_exit == incoming_room_num
                     # This is the stale update or a failed move. The room hasn't changed.
+                    self.logger.debug(
+                        f"Implicit exit '{self.pending_exit_command}' ignored. "
+                        f"prev={previous_room_num_on_exit}, incoming={incoming_room_num}. "
+                        f"Room change required."
+                    )
                     # We do NOT reset the pending state. We let the timeout in _handle_command_sent handle it.
                     self.logger.debug(
                         "Room number unchanged after move command; likely a stale update or failed move. Waiting for new room data or timeout."
