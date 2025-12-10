@@ -35,19 +35,16 @@ def test_multiple_exits_to_same_room(test_database):
     )
 
     # Try to create second exit "enter portal" -> Room 2
-    # This should FAIL with IntegrityError due to (from_room, to_room_number) constraint
-    # The fallback logic in GameKnowledgeGraph.record_exit_success will handle this
-    try:
-        RoomExit.create(
-            from_room=r1,
-            to_room=r2,
-            to_room_number=2,
-            direction="enter portal"
-        )
-        # If we get here, the constraint didn't work
-        pytest.fail("Expected IntegrityError was not raised! Constraint is not working.")
-    except IntegrityError:
-        # This is expected - the constraint is working correctly
-        # In production, GameKnowledgeGraph.record_exit_success will catch this
-        # and update the existing exit instead
-        pass
+    # This should SUCCEED now that we allow multiple exits to the same room (aliases)
+    # as long as the direction string is different.
+    exit2 = RoomExit.create(
+        from_room=r1,
+        to_room=r2,
+        to_room_number=2,
+        direction="enter portal"
+    )
+
+    assert exit2.id != exit1.id
+    assert exit2.direction == "enter portal"
+    assert exit2.to_room_number == 2
+

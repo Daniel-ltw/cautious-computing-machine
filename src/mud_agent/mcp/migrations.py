@@ -118,6 +118,22 @@ class MigrationManager:
             down_func=self._migration_009_down
         ))
 
+        # Migration 010: Fix Unique Constraint to allow Aliases
+        self.migrations.append(Migration(
+            version=10,
+            description="Fix unique constraint to allow aliases: UNIQUE(from_room, direction)",
+            up_func=self._migration_010_up,
+            down_func=self._migration_010_down
+        ))
+
+        # Migration 011: Add details column to Room
+        self.migrations.append(Migration(
+            version=11,
+            description="Add details column to Room table",
+            up_func=self._migration_011_up,
+            down_func=self._migration_011_down
+        ))
+
     def _get_schema_version(self) -> int:
         """Get the current schema version from the database."""
         try:
@@ -431,6 +447,81 @@ class MigrationManager:
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_direction_unique ON roomexit (from_room_id, direction)"
             )
         print("✓ Rolled back to unique constraint on (from_room_id, direction)")
+
+    def _migration_010_up(self):
+        """Migration 010: Fix Unique Constraint to allow Aliases."""
+        with db.atomic():
+            # Drop the restrictive unique constraint on (from_room, to_room)
+            db.execute_sql("DROP INDEX IF EXISTS idx_roomexit_from_to")
+
+            # Validate usage of tuple in DELETE/IN clause which is supported in SQLite
+            # Delete ALL exits that have duplicates for the same direction (clean slate)
+            # This ensures we don't arbitrarily pick one "correct" exit when they might be different (e.g. aliases)
+            # SQLite supports row value comparisons in newer versions, but to be safe and compatible:
+            # We find the IDs of all rows that belong to a group with count > 1
+            db.execute_sql("""
+                DELETE FROM roomexit
+                WHERE id IN (
+                    SELECT r1.id
+                    FROM roomexit r1
+                    JOIN (
+                        SELECT from_room_id, direction
+                        FROM roomexit
+                        GROUP BY from_room_id, direction
+                        HAVING COUNT(*) > 1
+                    ) r2 ON r1.from_room_id = r2.from_room_id AND r1.direction = r2.direction
+                )
+            """)
+
+            # Create the correct unique constraint on (from_room, direction) - allow multiple paths to same dest
+            db.execute_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_direction_unique ON roomexit (from_room_id, direction)"
+            )
+
+            # Create index on to_room_number since it's no longer covered by a unique constraint
+            db.execute_sql(
+                "CREATE INDEX IF NOT EXISTS idx_roomexit_to_room_number ON roomexit (to_room_number)"
+            )
+        print("✓ Fixed unique constraints: Aliases allowed, unique by direction enforced. Duplicates wiped.")
+
+    def _migration_010_down(self):
+        """Migration 010 rollback: Revert to restrictive constraint."""
+        with db.atomic():
+            db.execute_sql("DROP INDEX IF EXISTS idx_roomexit_from_direction_unique")
+            db.execute_sql("DROP INDEX IF EXISTS idx_roomexit_to_room_number")
+
+            # Re-create the restrictive constraint (might fail if aliases exist)
+            try:
+                db.execute_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_roomexit_from_to ON roomexit (from_room_id, to_room_number)"
+                )
+            except Exception as e:
+                print(f"⚠ Could not restore restrictive constraint: {e}")
+        print("✓ Rolled back to restrictive constraints")
+
+    def _migration_011_up(self):
+        """Migration 011: Add details column to Room."""
+        with db.atomic():
+            try:
+                db.execute_sql(
+                    "ALTER TABLE room ADD COLUMN details TEXT"
+                )
+            except Exception:
+                pass  # Column likely exists
+        print("✓ Added details column to Room table")
+
+    def _migration_011_down(self):
+        """Migration 011 rollback: Remove details column from Room."""
+        # SQLite doesn't support dropping columns easily in older versions,
+        # but modern SQLite does with ALTER TABLE DROP COLUMN.
+        # However, for safety/compatibility we'll use the no-op or complex approach if needed.
+        # For this simple case, we'll try the modern syntax but catch errors.
+        try:
+            with db.atomic():
+                db.execute_sql("ALTER TABLE room DROP COLUMN details")
+            print("✓ Dropped details column from Room table")
+        except Exception as e:
+            print(f"⚠ Could not drop details column (might need table rebuild): {e}")
 
     def _migration_002_down(self):
         """Migration 002 rollback: Remove composite unique constraint."""

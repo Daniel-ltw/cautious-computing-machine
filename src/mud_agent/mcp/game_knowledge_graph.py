@@ -409,19 +409,26 @@ class GameKnowledgeGraph:
                     else:
                         stored_norm = mapping.get(stored, stored)
 
-                    # Direct match
-                    if stored_norm == dir_key:
-                        # Verify destination if known to avoid collisions (e.g. "enter hut" vs "enter portal")
-                        if ex.to_room_number is not None and ex.to_room_number != to_room_num:
-                            continue
+                    # Direct match on stored direction name
+                    if stored == dir_in:
+                         exit_obj = ex
+                         break
+
+                    # Also match if the normalized directions are identical AND the stored direction
+                    # is NOT a generic verb like 'enter' that might be used for multiple exits.
+                    # e.g. 'n' vs 'north' is fine to match.
+                    # 'enter hut' vs 'enter rubble' -> both norm to 'enter' -> should NOT match.
+                    if stored_norm == dir_key and stored_norm not in ["enter", "board", "escape", "say"]:
                         exit_obj = ex
                         break
 
                     # Check if the command contains the stored direction (e.g. "enter portal" matches "portal")
                     # This handles cases where the exit is named "portal" but the command is "enter portal"
-                    if dir_in.endswith(stored) and len(stored) > 2: # Ensure stored isn't just a short direction like 'n'
-                         if ex.to_room_number is not None and ex.to_room_number != to_room_num:
-                            continue
+                    if len(stored) > 2 and dir_in.endswith(stored):
+                         # Verify destination matching if we have that info, to prevent bad matches?
+                         # Actually, without unique constraint on (from, to), multiple exits can go to same place.
+                         # If 'enter portal' goes to same room as 'portal' exit, we should match.
+                         # If we don't know destination of stored exit, we assume match based on name.
                          exit_obj = ex
                          break
 
@@ -431,51 +438,16 @@ class GameKnowledgeGraph:
                     f" pre-commands: {pre_cmds}"
                 )
 
-                # Let's refactor slightly to track if we used fallback.
-                is_fallback = False
                 if exit_obj is None:
                     try:
+                        # With the new unique constraint on (from_room, direction), we can trust get_or_create
+                        # to create a new exit if the direction string is different (e.g. "enter rubble" vs "enter hut")
                         exit_obj = self.get_or_create_exit(from_room, dir_in, to_room=to_room, to_room_number=to_room_num)
                     except Exception as e:
-                        self.logger.warning(f"Failed to get_or_create_exit for {dir_in}: {e}. Trying fallback.")
-                        for ex in from_room.exits:
-                            if ex.to_room_number == to_room_num:
-                                # Check if we should update the existing exit
-                                # Don't overwrite if the new command is ignored (scan, enter, etc)
-                                # or if the existing command is specific and the new one is generic
-                                should_update = True
-                                new_cmd_lower = move_cmd.strip().lower()
+                        self.logger.error(f"Failed to record new exit {dir_in} -> {to_room_num}: {e}")
+                        return
 
-                                # List of commands that should never overwrite an existing exit
-                                ignored_overwrite_cmds = ['scan', 'enter', 'look']
-                                if new_cmd_lower in ignored_overwrite_cmds:
-                                    should_update = False
-                                    self.logger.debug(f"Fallback: Not updating exit with ignored command '{move_cmd}'")
-
-                                exit_obj = ex
-                                is_fallback = True
-
-                                if should_update:
-                                    self.logger.info(f"Fallback: Found existing exit to {to_room_num} ({ex.direction}). Updating it with new command.")
-                                else:
-                                    self.logger.info(f"Fallback: Found existing exit to {to_room_num} ({ex.direction}). Keeping existing command.")
-                                    # Set move_cmd to the existing one so we don't overwrite it later
-                                    if ex.command_details:
-                                        import json
-                                        try:
-                                            details = json.loads(ex.command_details)
-                                            if details.get('move_command'):
-                                                move_cmd = details.get('move_command')
-                                        except:
-                                            pass
-                                break
-
-                        if not is_fallback:
-                            self.logger.error(f"Could not record exit {dir_in} -> {to_room_num} even with fallback.")
-                            return
-
-
-                self.logger.debug(f"Found existing exit {dir_in} -> {to_room_num}. Updating it with new command.")
+                self.logger.debug(f"Updating exit {exit_obj.direction} -> {to_room_num}")
                 exit_obj.to_room = to_room
                 exit_obj.to_room_number = to_room_num
                 exit_obj.save()
@@ -486,7 +458,7 @@ class GameKnowledgeGraph:
                     self.logger.debug(f"Exit {exit_obj.direction} already has correct details, skipping update.")
                 else:
                     exit_obj.record_exit_success(
-                        move_command=move_cmd, pre_commands=pre_cmds or [], force=is_fallback
+                        move_command=move_cmd, pre_commands=pre_cmds or [], force=False
                     )
         except DoesNotExist:
             # This case should ideally not be hit for from_room or to_room if they are managed correctly.

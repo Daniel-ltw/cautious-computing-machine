@@ -180,10 +180,16 @@ async def test_record_enter_exit_records_details(knowledge_graph, test_db):
         pre_cmds=["unlock portal"],
     )
 
-    exit_obj = from_room.exits.where(RoomExit.direction == "enter gate").get()
+    # Verify that a NEW exit was created for "enter portal"
+    # because "enter gate" and "enter portal" are distinct commands (aliases)
+    exit_obj = from_room.exits.where(RoomExit.direction == "enter portal").get()
     details = exit_obj.get_command_details()
     assert details["move_command"] == "enter portal"
     assert details["pre_commands"] == ["unlock portal"]
+
+    # Verify "enter gate" still exists and is unchanged
+    gate_exit = from_room.exits.where(RoomExit.direction == "enter gate").get()
+    assert gate_exit.id != exit_obj.id
 
     # Remove outdated src.mud_agent path-based tests
 

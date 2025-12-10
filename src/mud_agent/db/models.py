@@ -89,6 +89,9 @@ class Room(BaseModel):
     coord_y = IntegerField(null=True)
     coord_z = IntegerField(null=True)
 
+    # Room details (for shop detection, etc.)
+    details = TextField(null=True)
+
     class Meta:
         indexes = (
             # Spatial index for coordinate-based queries
@@ -141,6 +144,7 @@ class Room(BaseModel):
                 "coord_x": data.get("coord", {"x": room.coord_x}).get("x"),
                 "coord_y": data.get("coord", {"y": room.coord_y}).get("y"),
                 "coord_z": data.get("coord", {"z": room.coord_z}).get("z", 0),
+                "details": data.get("details"),
             }
 
             if not created:
@@ -204,6 +208,7 @@ class Room(BaseModel):
             "symbol": "●",
             "exits": exits,
             "npcs": npcs,
+            "details": self.details,
         }
 
 
@@ -222,10 +227,8 @@ class RoomExit(BaseModel):
 
     class Meta:
         indexes = (
-            # Unique constraint on from_room + to_room_number (only one exit per destination)
-            (('from_room', 'to_room_number'), True),
-            # Index for looking up exits by direction
-            (('from_room', 'direction'), False),
+            # Unique constraint on from_room + direction (correct MUD design)
+            (('from_room', 'direction'), True),
             # Index for reverse lookups
             (('to_room_number', 'direction'), False),
         )

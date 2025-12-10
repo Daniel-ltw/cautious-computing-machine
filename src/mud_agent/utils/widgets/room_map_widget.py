@@ -43,6 +43,7 @@ class RoomMapWidget(StateListener, Static):
         "RIGHT": "]",
         "CURRENT": "@",
         "OTHER": "#",
+        "SHOP": "$",
     }
 
     def __init__(self, room_data: dict[str, Any] | None = None, *args, **kwargs) -> None:
@@ -89,6 +90,18 @@ class RoomMapWidget(StateListener, Static):
         grid = [[' ' for _ in range(5)] for _ in range(3)]
 
         center_char = self.ROOM_CHARS["CURRENT"] if self.is_current else self.ROOM_CHARS["OTHER"]
+
+        # Check for shop
+        details = str(self.room_data.get("details", "")).lower()
+        if "shop" in details or "store" in details:
+            if not self.is_current:
+                center_char = self.ROOM_CHARS["SHOP"]
+            # Option: if we want to show it's a shop even when current, we might need a different indication.
+            # For now, let's keep '@' as current player position as priority,
+            # but maybe we can color it differently or just rely on 'OTHER' logic for map scanning.
+            # The user asked: "change the # symbol on the room in the mapper container to a $ symbol if the room has a shop"
+            # This implies when it's NOT the current room (which is @).
+
         grid[1][1] = self.ROOM_CHARS["LEFT"]
         grid[1][2] = center_char
         grid[1][3] = self.ROOM_CHARS["RIGHT"]
