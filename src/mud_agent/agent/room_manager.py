@@ -131,7 +131,7 @@ class RoomManager:
                 # Only trigger force exit check for whitelisted commands
                 # This prevents accidental exit recording from commands like "look", "inventory", or typos
                 implicit_exit_verbs = [
-                    "enter ", "board", "climb", "crawl", "leave", "descend", "ascend", "give ", "kill ", "push ", "catch "
+                    "enter ", "board", "climb", "crawl", "leave", "descend", "ascend", "give ", "kill ", "push ", "catch ", "wade "
                 ]
                 is_allowed_implicit = any(cmd_lower.startswith(v) for v in implicit_exit_verbs)
 
@@ -192,8 +192,10 @@ class RoomManager:
             self.from_room_num_on_exit = None
             self.pending_exit_command = None
         else:
-            self.logger.debug(f"No room change detected after '{command}' (from: {from_room_num}, after: {new_room_num}). Clearing pending command.")
-            self.pending_exit_command = None
+            self.logger.debug(f"No room change detected after '{command}' (from: {from_room_num}, after: {new_room_num}). Keeping pending command active for delayed update.")
+            # Do NOT clear pending_exit_command here. We want it to persist until the room update actually arrives,
+            # even if it takes longer than 2 seconds (lag).
+            # self.pending_exit_command = None
 
     def _get_direction_from_command(self, command: str) -> str | None:
         """Extracts a direction from a command string."""

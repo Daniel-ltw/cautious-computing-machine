@@ -111,7 +111,7 @@ class TestRoomManagerImplicitDebug:
         assert manager.pending_exit_command is None
 
     async def test_implicit_exit_timeout_cleanup(self):
-        """Test that pending command is cleared if no room change occurs."""
+        """Test that pending command PERSISTS if no room change occurs (lag handling)."""
         mock_agent = MagicMock()
         mock_agent.events = MagicMock()
         mock_agent.events.emit = AsyncMock()
@@ -129,8 +129,8 @@ class TestRoomManagerImplicitDebug:
         with patch("asyncio.sleep", new=AsyncMock()):
             await manager._handle_force_exit_check("enter pool")
 
-        # 3. Verify pending command cleared
-        assert manager.pending_exit_command is None
+        # 3. Verify pending command PERSISTS (changed from cleared)
+        assert manager.pending_exit_command == "enter pool"
 
     async def test_implicit_exit_push_off(self):
         """Test that 'push off' triggers implicit exit recording."""
