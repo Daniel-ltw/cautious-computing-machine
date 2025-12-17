@@ -93,7 +93,7 @@ class MUDAgent:
         self.automation_manager = AutomationManager(self.events)
         self.npc_manager = NPCManager(self.events)
         self.decision_engine = DecisionEngine(self.events, self.client)
-        self.quest_manager = QuestManager(self.events)
+        self.quest_manager = QuestManager(self)
 
         # For backward compatibility, alias state_manager as status_manager
         self.status_manager = self.state_manager
@@ -112,6 +112,7 @@ class MUDAgent:
     async def setup_managers(self):
         """Set up all the managers."""
         await self.room_manager.setup()
+        await self.quest_manager.setup()
         self.logger.info("Room manager setup complete")
 
     @property

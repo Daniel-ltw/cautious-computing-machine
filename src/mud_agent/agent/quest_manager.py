@@ -9,6 +9,8 @@ import asyncio
 import logging
 import re
 import time
+import subprocess
+import sys
 
 # Constants for quest management
 DEFAULT_QUEST_COOLDOWN = 120  # Default 2 minutes cooldown in seconds
@@ -49,6 +51,52 @@ class QuestManager:
         )
         self.next_quest_available_time = ZERO
         self.quest_time_checked = False
+
+    async def setup(self) -> None:
+        """Set up the quest manager."""
+        # Subscribe to incoming data events from the client
+        if hasattr(self.agent, "client") and hasattr(self.agent.client, "events"):
+            self.agent.client.events.on("data", self._handle_incoming_data)
+            self.logger.info("QuestManager subscribed to client data events")
+        else:
+            self.logger.warning("Agent client or events not available for subscription")
+
+    async def _handle_incoming_data(self, data: str) -> None:
+        """Handle incoming data from the MUD."""
+        try:
+            # Strip ANSI codes for clean matching
+            clean_data = re.sub(r'\x1b\[[0-9;]*m', '', data)
+
+            # Log that we received data (for debugging "not used" claims)
+            if len(clean_data) > 0:
+                 # Only log first 50 chars to avoid spam, but prove life
+                self.logger.debug(f"QuestManager received data: {clean_data[:50]}...")
+
+            if "You may quest again" in clean_data:
+                self.logger.info("Quest available alert triggered!")
+                self._play_alert_sound()
+        except Exception as e:
+            self.logger.error(f"Error handling incoming data in QuestManager: {e}")
+
+    def _play_alert_sound(self) -> None:
+        """Play a system alert sound in a non-blocking way."""
+        try:
+            if sys.platform == "darwin":  # macOS
+                subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"])
+            elif sys.platform == "win32":  # Windows
+                # Use PowerShell to play a system sound
+                subprocess.Popen(["powershell", "-c", "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\notify.wav').PlaySync();"])
+            elif sys.platform.startswith("linux"):  # Linux
+                # Try common players
+                try:
+                    subprocess.Popen(["aplay", "/usr/share/sounds/alsa/Front_Center.wav"], stderr=subprocess.DEVNULL)
+                except FileNotFoundError:
+                    try:
+                        subprocess.Popen(["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"], stderr=subprocess.DEVNULL)
+                    except FileNotFoundError:
+                        self.logger.warning("No suitable audio player (aplay/paplay) found for Linux alert.")
+        except Exception as e:
+            self.logger.error(f"Failed to play alert sound: {e}")
 
     async def find_questor(self, use_speedwalk: bool = True) -> bool:
         """Find and navigate to the questor NPC.

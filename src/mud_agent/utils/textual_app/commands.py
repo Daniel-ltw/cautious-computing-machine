@@ -158,6 +158,14 @@ class CommandProcessor:
             elif command == "/filter":
                 await self.show_filter_status()
 
+            elif command == "/testalert":
+                command_log.write("[bold cyan]Testing quest alert sound...[/bold cyan]")
+                if hasattr(self.agent, "quest_manager"):
+                    self.agent.quest_manager._play_alert_sound()
+                    command_log.write("[bold green]Alert sound triggered.[/bold green]")
+                else:
+                    command_log.write("[bold red]QuestManager not found on agent.[/bold red]")
+
             else:
                 command_log.write(f"[bold yellow]Unknown internal command: {command}[/bold yellow]")
                 command_log.write("[bold cyan]Type /help for available commands[/bold cyan]")

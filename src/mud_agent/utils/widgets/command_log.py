@@ -6,6 +6,8 @@ This module contains the command log widget implementation for the MUD agent UI.
 
 import logging
 import os
+import subprocess
+import sys
 
 from textual.widgets import RichLog
 
@@ -228,6 +230,30 @@ class CommandLog(RichLog):
         # Add a separator after significant messages
         if len(data.strip()) > 20:  # Only add separator for substantial messages
             self.write("=" * 80)
+
+        # check for quest alert
+        if "You may quest again" in data:
+            self._play_alert_sound()
+
+    def _play_alert_sound(self) -> None:
+        """Play a system alert sound in a non-blocking way."""
+        try:
+            if sys.platform == "darwin":  # macOS
+                subprocess.Popen(["afplay", "/System/Library/Sounds/Glass.aiff"])
+            elif sys.platform == "win32":  # Windows
+                # Use PowerShell to play a system sound
+                subprocess.Popen(["powershell", "-c", "(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\notify.wav').PlaySync();"])
+            elif sys.platform.startswith("linux"):  # Linux
+                # Try common players
+                try:
+                    subprocess.Popen(["aplay", "/usr/share/sounds/alsa/Front_Center.wav"], stderr=subprocess.DEVNULL)
+                except FileNotFoundError:
+                    try:
+                        subprocess.Popen(["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"], stderr=subprocess.DEVNULL)
+                    except FileNotFoundError:
+                        logger.warning("No suitable audio player (aplay/paplay) found for Linux alert.")
+        except Exception as e:
+            logger.error(f"Failed to play alert sound: {e}")
 
     def _on_connected(self, host: str, port: int) -> None:
         """Handle connected event.
