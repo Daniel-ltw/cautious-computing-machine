@@ -131,7 +131,7 @@ class RoomManager:
                 # Only trigger force exit check for whitelisted commands
                 # This prevents accidental exit recording from commands like "look", "inventory", or typos
                 implicit_exit_verbs = [
-                    "enter ", "board", "climb", "crawl", "leave", "descend", "ascend", "give ", "kill ", "push ", "catch ", "wade "
+                    "enter ", "board", "climb", "crawl", "leave", "descend", "ascend", "give ", "kill ", "push ", "catch ", "wade ", "slide "
                 ]
                 is_allowed_implicit = any(cmd_lower.startswith(v) for v in implicit_exit_verbs)
 
