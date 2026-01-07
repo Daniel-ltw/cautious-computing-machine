@@ -8,7 +8,7 @@ from unittest.mock import patch
 # Import helper to add src to Python path
 from test_helper import *
 
-from mud_agent.config.config import Config, LogConfig, ModelConfig, MUDConfig
+from mud_agent.config.config import Config, LogConfig, ModelConfig, MUDConfig, AgentConfig
 
 
 class TestModelConfig:
@@ -125,3 +125,38 @@ class TestConfig:
                 assert config.model.api_base == "test_api_base"
                 assert isinstance(config.mud, MUDConfig)
                 assert isinstance(config.log, LogConfig)
+
+class TestAgentConfig:
+    """Tests for the AgentConfig class."""
+
+    def test_default_values(self):
+        """Test that the default values are set correctly."""
+        config = AgentConfig()
+        assert config.autocast_commands == ["nimble", "hide", "sneak", "cast under"]
+        assert config.recall_command is None
+
+    def test_from_env(self):
+        """Test creating an AgentConfig from environment variables."""
+        with patch.dict(
+            os.environ,
+            {
+                "AUTOCAST_COMMANDS": "cmd1, cmd2",
+                "RECALL": "recall_home",
+            },
+        ):
+            config = AgentConfig.from_env()
+
+            assert config.autocast_commands == ["cmd1", "cmd2"]
+            assert config.recall_command == "recall_home"
+
+    def test_from_dict(self):
+        """Test creating an AgentConfig from a dictionary."""
+        config_dict = {
+            "autocast_commands": ["cmd1", "cmd2"],
+            "recall_command": "recall_home",
+        }
+
+        config = AgentConfig.from_dict(config_dict)
+
+        assert config.autocast_commands == ["cmd1", "cmd2"]
+        assert config.recall_command == "recall_home"

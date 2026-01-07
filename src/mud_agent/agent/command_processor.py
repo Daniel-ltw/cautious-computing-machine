@@ -66,6 +66,15 @@ class CommandProcessor:
             str: The response from the MUD server
         """
         try:
+            # Intercept recall command if a custom one is configured
+            if (
+                command.lower() == "recall"
+                and hasattr(self.agent.config, "agent")
+                and self.agent.config.agent.recall_command
+            ):
+                self.logger.info(f"Intercepting recall command, replacing with: {self.agent.config.agent.recall_command}")
+                command = self.agent.config.agent.recall_command
+
             # Capture the current room number BEFORE sending the command to avoid race condition
             # where GMCP updates arrive before the command_sent handler runs
             from_room_num = None

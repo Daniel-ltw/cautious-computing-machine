@@ -124,9 +124,11 @@ class AgentConfig:
     """Configuration for the agent behavior."""
 
     autocast_commands: list[str]
+    recall_command: str | None
 
-    def __init__(self, autocast_commands: list[str] | None = None):
+    def __init__(self, autocast_commands: list[str] | None = None, recall_command: str | None = None):
         self.autocast_commands = autocast_commands or ["nimble", "hide", "sneak", "cast under"]
+        self.recall_command = recall_command
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -136,11 +138,17 @@ class AgentConfig:
             AgentConfig: A new AgentConfig instance.
         """
         autocast_env = os.getenv("AUTOCAST_COMMANDS")
+        recall_command = os.getenv("RECALL")
+
+        commands = None
         if autocast_env:
             # Split by comma and strip whitespace
             commands = [cmd.strip() for cmd in autocast_env.split(",") if cmd.strip()]
-            return cls(autocast_commands=commands)
-        return cls()
+
+        return cls(
+            autocast_commands=commands,
+            recall_command=recall_command
+        )
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "AgentConfig":
@@ -154,6 +162,7 @@ class AgentConfig:
         """
         return cls(
             autocast_commands=config.get("autocast_commands"),
+            recall_command=config.get("recall_command"),
         )
 
 

@@ -561,5 +561,5 @@ def find_path_between_rooms(from_room: int, to_room_number: int, max_depth: int 
 
             return []  # No path found
     except Exception as e:
-        logger.error(f"Error finding path from {from_room} to {to_room}: {e}", exc_info=True)
+        logger.error(f"Error finding path from {from_room} to {to_room_number}: {e}", exc_info=True)
         return []

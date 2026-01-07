@@ -270,3 +270,25 @@ class TestCommandProcessor:
         result = await self.processor.process_command("rest")
 
         assert result == "Test response"
+
+    @pytest.mark.asyncio
+    async def test_process_command_intercepts_recall(self):
+        """Test that recall command is intercepted and replaced if configured."""
+        self.agent.config = MagicMock()
+        self.agent.config.agent.recall_command = "wear amu;enter;dual sun"
+
+        await self.processor.process_command("recall")
+
+        # verify that the command sent was the replaced one
+        self.agent.mud_tool.forward.assert_called_once_with("wear amu;enter;dual sun", is_user_command=False)
+
+    @pytest.mark.asyncio
+    async def test_process_command_no_recall_interception(self):
+        """Test that recall command is NOT intercepted if not configured."""
+        self.agent.config = MagicMock()
+        self.agent.config.agent.recall_command = None
+
+        await self.processor.process_command("recall")
+
+        # verify that the command sent was original "recall"
+        self.agent.mud_tool.forward.assert_called_once_with("recall", is_user_command=False)
