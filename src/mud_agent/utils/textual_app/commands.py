@@ -722,18 +722,20 @@ class CommandProcessor:
         Args:
             text: The text to pre-fill
         """
-        try:
-            command_input = self.app.query_one("#command-input", CommandInput)
-            # The CommandInput widget may have an 'input' attribute (textual.widgets.Input)
-            if hasattr(command_input, "input"):
-                command_input.input.value = text
-                command_input.input.focus()
-            # Fallback: try setting value directly if possible
-            elif hasattr(command_input, "value"):
+        def do_prefill() -> None:
+            try:
+                command_input = self.app.query_one("#command-input", CommandInput)
                 command_input.value = text
+                command_input.cursor_position = len(text)
                 command_input.focus()
+            except Exception as e:
+                logger.error(f"Error in pre-fill callback: {e}", exc_info=True)
+
+        try:
+            # Schedule the update for the next iteration to avoid race conditions
+            self.app.call_later(do_prefill)
         except Exception as e:
-            logger.error(f"Error pre-filling command input: {e}", exc_info=True)
+            logger.error(f"Error scheduling pre-fill: {e}", exc_info=True)
 
 
 
