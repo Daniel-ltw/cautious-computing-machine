@@ -306,6 +306,35 @@ class RoomExit(BaseModel):
         if not force and norm_dir != norm_cmd and not move_command.strip().lower().endswith(self.direction.strip().lower()):
             return
 
+        if norm_cmd != "enter" and self.from_room and self.from_room.zone:
+            # Check if this command is already used by another exit in the same area
+            try:
+                # Define standard directions to exclude from collision checks
+                STANDARD_DIRECTIONS = {
+                    "n", "s", "e", "w", "u", "d",
+                    "north", "south", "east", "west", "up", "down"
+                }
+
+                # We need to fetch all exits in the area and check in python to handle normalization logic correctly
+                area_exits = (RoomExit
+                            .select()
+                            .join(Room, on=(RoomExit.from_room == Room.id))
+                            .where(
+                                (Room.zone == self.from_room.zone) &
+                                (RoomExit.direction.not_in(STANDARD_DIRECTIONS))
+                            ))
+
+                for exit in area_exits:
+                    if exit.id == self.id:
+                        continue
+                    other_details = exit.get_command_details()
+                    other_move = other_details.get("move_command")
+                    if other_move and _norm(other_move) == norm_cmd:
+                        logger.info(f"Skipping save: Command '{norm_cmd}' (raw: '{move_command}') already used in area '{self.from_room.zone}' by exit from room {exit.from_room.room_number}")
+                        return
+            except Exception as e:
+                logger.error(f"Error checking for duplicate area commands: {e}", exc_info=True)
+
         details_dict["move_command"] = move_command
         details_dict["pre_commands"] = pre_commands or []
         details_dict["last_success_at"] = datetime.now(timezone.utc).isoformat()
