@@ -6,11 +6,16 @@ This module provides a simple migration system to manage schema changes
 for the SQLite database using Peewee ORM models.
 """
 
+import logging
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
+from peewee import CharField, DateTimeField
+
 from .models import NPC, Entity, Observation, Relation, Room, RoomExit, db
+
+logger = logging.getLogger(__name__)
 
 
 class Migration:
@@ -52,6 +57,14 @@ class MigrationManager:
             description="Create initial schema with all tables and indexes",
             up_func=self._migration_001_up,
             down_func=self._migration_001_down
+        ))
+
+        # Migration 002: Add sync tracking columns
+        self.migrations.append(Migration(
+            version=2,
+            description="Add sync_status and remote_updated_at columns for Supabase sync",
+            up_func=self._migration_002_up,
+            down_func=self._migration_002_down
         ))
 
     def _get_schema_version(self) -> int:
@@ -147,6 +160,39 @@ class MigrationManager:
         tables = [Relation, Observation, NPC, RoomExit, Room, Entity]
         db.drop_tables(tables, safe=True)
         print("✓ Dropped all tables")
+
+    def _migration_002_up(self):
+        """Add sync tracking columns to all models."""
+        from playhouse.migrate import SqliteMigrator, migrate
+        migrator = SqliteMigrator(db)
+
+        tables_to_update = ['entity', 'room', 'roomexit', 'npc', 'observation', 'relation']
+        for table in tables_to_update:
+            try:
+                migrate(
+                    migrator.add_column(table, 'sync_status',
+                        CharField(max_length=10, default='dirty')),
+                    migrator.add_column(table, 'remote_updated_at',
+                        DateTimeField(null=True, default=None)),
+                )
+            except Exception as e:
+                # Column may already exist
+                logger.warning(f"Migration 002: Could not add columns to {table}: {e}")
+
+    def _migration_002_down(self):
+        """Remove sync tracking columns."""
+        from playhouse.migrate import SqliteMigrator, migrate
+        migrator = SqliteMigrator(db)
+
+        tables_to_update = ['entity', 'room', 'roomexit', 'npc', 'observation', 'relation']
+        for table in tables_to_update:
+            try:
+                migrate(
+                    migrator.drop_column(table, 'sync_status'),
+                    migrator.drop_column(table, 'remote_updated_at'),
+                )
+            except Exception:
+                pass
 
     def migrate(self, target_version: int = None):
         """Run migrations up to the target version."""
