@@ -4,6 +4,7 @@ This module provides a dedicated class for managing the game's knowledge graph,
 leveraging an SQLite database via the Peewee ORM for robust and efficient data storage.
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any
@@ -40,6 +41,10 @@ class GameKnowledgeGraph:
         self.logger = logging.getLogger(__name__)
         self._initialized = False
 
+    async def _run_db(self, func, *args, **kwargs):
+        """Run a blocking database function in a separate thread."""
+        return await asyncio.to_thread(func, *args, **kwargs)
+
     async def initialize(self) -> None:
         """Initialize the database connection and run migrations."""
         try:
@@ -60,7 +65,7 @@ class GameKnowledgeGraph:
             db.close()
             self.logger.info("Database connection closed.")
 
-    def get_exit_command_details(self, from_room_number: int, direction: str) -> dict[str, Any]:
+    async def get_exit_command_details(self, from_room_number: int, direction: str) -> dict[str, Any]:
         """Retrieve stored command sequence details for a room exit.
 
         Args:
@@ -70,6 +75,10 @@ class GameKnowledgeGraph:
         Returns:
             Dict with keys: move_command, pre_commands, last_success_at, source. Empty if none.
         """
+        return await self._run_db(self._get_exit_command_details_sync, from_room_number, direction)
+
+    def _get_exit_command_details_sync(self, from_room_number: int, direction: str) -> dict[str, Any]:
+        """Synchronous implementation of get_exit_command_details."""
         try:
             if not self._initialized:
                 self.logger.error("Cannot get exit details: Knowledge graph not initialized.")
@@ -85,7 +94,7 @@ class GameKnowledgeGraph:
             }
             dir_key = mapping.get(dir_norm, dir_norm)
 
-            room = self.get_room_by_number(int(from_room_number))
+            room = self.get_room_by_number_sync(int(from_room_number))
             if not room:
                 return {}
             for exit_obj in room.exits:
@@ -108,12 +117,16 @@ class GameKnowledgeGraph:
         Returns:
             The created or updated Entity object, or None if data is invalid.
         """
+        return await self._run_db(self._add_entity_sync, entity_data)
+
+    def _add_entity_sync(self, entity_data: dict[str, Any]) -> Entity | None:
+        """Synchronous implementation of add_entity."""
         if not self._initialized:
-            try:
-                await self.initialize()
-            except Exception:
-                self.logger.error("Cannot add entity: Knowledge graph not initialized.")
-                return None
+            # We can't await initialize() here because we are in a sync wrapper running in a thread.
+            # However, logic calling this should ensure initialization or we assume init is done.
+            # For robustness, we check the flag.
+             self.logger.error("Cannot add entity: Knowledge graph not initialized.")
+             return None
 
         entity_type = entity_data.get("entityType")
         if not entity_type:
@@ -151,7 +164,7 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error adding entity: {e}", exc_info=True)
             return None
 
-    def add_relation(
+    async def add_relation(
         self, from_entity: Entity, to_entity: Entity, relation_type: str
     ) -> Relation | None:
         """Add a directional relation between two entities.
@@ -164,6 +177,12 @@ class GameKnowledgeGraph:
         Returns:
             The created Relation object, or None on failure.
         """
+        return await self._run_db(self._add_relation_sync, from_entity, to_entity, relation_type)
+
+    def _add_relation_sync(
+        self, from_entity: Entity, to_entity: Entity, relation_type: str
+    ) -> Relation | None:
+        """Synchronous implementation of add_relation."""
         if not self._initialized:
             self.logger.error("Cannot add relation: Knowledge graph not initialized.")
             return None
@@ -184,7 +203,7 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error adding relation: {e}", exc_info=True)
             return None
 
-    def get_entity(self, name: str) -> Entity | None:
+    async def get_entity(self, name: str) -> Entity | None:
         """Retrieve an entity by its name.
 
         Args:
@@ -193,6 +212,10 @@ class GameKnowledgeGraph:
         Returns:
             The Entity object if found, otherwise None.
         """
+        return await self._run_db(self._get_entity_sync, name)
+
+    def _get_entity_sync(self, name: str) -> Entity | None:
+        """Synchronous implementation of get_entity."""
         if not self._initialized:
             self.logger.error("Cannot get entity: Knowledge graph not initialized.")
             return None
@@ -206,7 +229,18 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving entity '{name}': {e}", exc_info=True)
             return None
 
-    def get_room_by_number(self, room_number: int) -> Room | None:
+    async def get_room_info(self, room_number: int) -> dict[str, Any] | None:
+        """Get room information as a dictionary, preventing lazy loading issues."""
+        return await self._run_db(self._get_room_info_sync, room_number)
+
+    def _get_room_info_sync(self, room_number: int) -> dict[str, Any] | None:
+        """Synchronous implementation of get_room_info."""
+        room = self.get_room_by_number_sync(room_number)
+        if room:
+            return room.to_info()
+        return None
+
+    async def get_room_by_number(self, room_number: int) -> Room | None:
         """Retrieve a room by its number.
 
         Args:
@@ -214,6 +248,13 @@ class GameKnowledgeGraph:
 
         Returns:
             The Room object if found, otherwise None.
+        """
+        return await self._run_db(self.get_room_by_number_sync, room_number)
+
+    def get_room_by_number_sync(self, room_number: int) -> Room | None:
+        """Synchronous implementation of get_room_by_number.
+        Publicly accessible (but technically should be private) as helper for other sync methods.
+        Identified as 'get_room_by_number_sync' to clarify it blocks.
         """
         if not self._initialized:
             self.logger.error("Cannot get room: Knowledge graph not initialized.")
@@ -227,7 +268,7 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving room '{room_number}': {e}", exc_info=True)
             return None
 
-    def get_rooms_by_area(self, area_name: str) -> list[Room]:
+    async def get_rooms_by_area(self, area_name: str) -> list[Room]:
         """Retrieve all rooms within a specific area.
 
         Args:
@@ -236,6 +277,10 @@ class GameKnowledgeGraph:
         Returns:
             A list of Room objects in the specified area.
         """
+        return await self._run_db(self._get_rooms_by_area_sync, area_name)
+
+    def _get_rooms_by_area_sync(self, area_name: str) -> list[Room]:
+        """Synchronous implementation of get_rooms_by_area."""
         if not self._initialized:
             self.logger.error("Cannot get rooms by area: Knowledge graph not initialized.")
             return []
@@ -246,8 +291,12 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving rooms for area '{area_name}': {e}", exc_info=True)
             return []
 
-    def get_room_with_unexplored_exits(self, area_name: str, visited_rooms: set) -> Room | None:
+    async def get_room_with_unexplored_exits(self, area_name: str, visited_rooms: set) -> Room | None:
         """Get a room in the specified area with at least one unexplored exit."""
+        return await self._run_db(self._get_room_with_unexplored_exits_sync, area_name, visited_rooms)
+
+    def _get_room_with_unexplored_exits_sync(self, area_name: str, visited_rooms: set) -> Room | None:
+        """Synchronous implementation of get_room_with_unexplored_exits."""
         if not self._initialized:
             self.logger.error("Cannot get room with unexplored exits: Knowledge graph not initialized.")
             return None
@@ -275,8 +324,12 @@ class GameKnowledgeGraph:
             self.logger.error(f"Error retrieving room with unexplored exits for area '{area_name}': {e}", exc_info=True)
             return None
 
-    def get_rooms_with_unexplored_exits(self, area_name: str) -> list[Room]:
+    async def get_rooms_with_unexplored_exits(self, area_name: str) -> list[Room]:
         """Get a list of rooms in the specified area with at least one unexplored exit."""
+        return await self._run_db(self._get_rooms_with_unexplored_exits_sync, area_name)
+
+    def _get_rooms_with_unexplored_exits_sync(self, area_name: str) -> list[Room]:
+        """Synchronous implementation of get_rooms_with_unexplored_exits."""
         if not self._initialized:
             self.logger.error("Cannot get rooms with unexplored exits: Knowledge graph not initialized.")
             return []
@@ -317,6 +370,24 @@ class GameKnowledgeGraph:
         pre_cmds: list[str] | None = None,
     ) -> None:
         """Records a successful exit from one room to another."""
+        return await self._run_db(
+            self._record_exit_success_sync,
+            from_room_num,
+            to_room_num,
+            direction,
+            move_cmd,
+            pre_cmds,
+        )
+
+    def _record_exit_success_sync(
+        self,
+        from_room_num: int,
+        to_room_num: int,
+        direction: str,
+        move_cmd: str,
+        pre_cmds: list[str] | None = None,
+    ) -> None:
+        """Synchronous implementation of record_exit_success."""
         # Skip recording for commands that are runs or chained (contain ';')
         if move_cmd.strip().lower().startswith('run') or direction.strip().lower().startswith('run') or ';' in direction or ';' in move_cmd:
             self.logger.debug(f"Skipping exit recording for disallowed move command: {move_cmd}")
@@ -353,11 +424,9 @@ class GameKnowledgeGraph:
             pre_cmds = [cmd for cmd in pre_cmds if not (cmd.strip().lower().startswith('run') or ';' in cmd)]
 
         if not self._initialized:
-            try:
-                await self.initialize()
-            except Exception:
-                self.logger.error("Cannot record exit success: Knowledge graph not initialized.")
-                return
+            # Cannot await inside sync implementation. Assume checked or fail.
+            self.logger.error("Cannot record exit success: Knowledge graph not initialized.")
+            return
 
         try:
             with db.atomic():
@@ -521,12 +590,13 @@ class GameKnowledgeGraph:
         Returns:
             List[Dict[str, Any]]: List of entities matching the type
         """
+        return await self._run_db(self._query_entities_by_type_sync, entity_type)
+
+    def _query_entities_by_type_sync(self, entity_type: str) -> list[dict[str, Any]]:
+        """Synchronous implementation of query_entities_by_type."""
         if not self._initialized:
-            try:
-                await self.initialize()
-            except Exception:
-                self.logger.error("Cannot query entities: Knowledge graph not initialized.")
-                return []
+            self.logger.error("Cannot query entities: Knowledge graph not initialized.")
+            return []
 
         try:
             entities = Entity.select().where(Entity.entity_type == entity_type)
@@ -544,7 +614,12 @@ class GameKnowledgeGraph:
         Returns:
             Optional[Dict[str, Any]]: The entity if found, None otherwise
         """
-        entity = self.get_entity(name)
+        return await self._run_db(self._query_entity_by_name_sync, name)
+
+    def _query_entity_by_name_sync(self, name: str) -> dict[str, Any] | None:
+        """Synchronous implementation of query_entity_by_name."""
+        # Using the sync get_entity helper
+        entity = self._get_entity_sync(name)
         if entity:
             return entity.to_dict()
         return None
@@ -558,12 +633,13 @@ class GameKnowledgeGraph:
         Returns:
             List[Dict[str, Any]]: List of NPC entities in the room
         """
+        return await self._run_db(self._find_npcs_in_room_sync, room_identifier)
+
+    def _find_npcs_in_room_sync(self, room_identifier: str) -> list[dict[str, Any]]:
+        """Synchronous implementation of find_npcs_in_room."""
         if not self._initialized:
-            try:
-                await self.initialize()
-            except Exception:
-                self.logger.error("Cannot find NPCs: Knowledge graph not initialized.")
-                return []
+             self.logger.error("Cannot find NPCs: Knowledge graph not initialized.")
+             return []
 
         try:
             room = Room.select().join(Entity).where(Entity.name == room_identifier).get()
@@ -585,12 +661,13 @@ class GameKnowledgeGraph:
         Returns:
             Optional[Dict[str, Any]]: The room entity if found, None otherwise
         """
+        return await self._run_db(self._find_room_with_npc_sync, npc_name)
+
+    def _find_room_with_npc_sync(self, npc_name: str) -> dict[str, Any] | None:
+        """Synchronous implementation of find_room_with_npc."""
         if not self._initialized:
-            try:
-                await self.initialize()
-            except Exception:
-                self.logger.error("Cannot find room with NPC: Knowledge graph not initialized.")
-                return None
+             self.logger.error("Cannot find room with NPC: Knowledge graph not initialized.")
+             return None
 
         try:
             npc = NPC.select().join(Entity).where(Entity.name == npc_name).get()
@@ -607,12 +684,14 @@ class GameKnowledgeGraph:
     async def find_path_between_rooms(
         self, start_room_id: int, end_room_identifier: int | str, max_depth: int = 1000
     ) -> dict[str, Any] | None:
+        return await self._run_db(self._find_path_between_rooms_sync, start_room_id, end_room_identifier, max_depth)
+
+    def _find_path_between_rooms_sync(
+        self, start_room_id: int, end_room_identifier: int | str, max_depth: int = 1000
+    ) -> dict[str, Any] | None:
         if not self._initialized:
-            try:
-                await self.initialize()
-            except Exception:
-                self.logger.error("Cannot find path: Knowledge graph not initialized.")
-                return None
+             self.logger.error("Cannot find path: Knowledge graph not initialized.")
+             return None
 
         try:
             if isinstance(end_room_identifier, int):
@@ -647,32 +726,46 @@ class GameKnowledgeGraph:
         Returns:
             Dict[str, Any]: A summary of the knowledge graph
         """
-        try:
-            # Count entities by type
-            entity_counts = {}
-            for entity in self.knowledge_graph["entities"].values():
-                entity_type = entity.get("entityType", "Unknown")
-                entity_counts[entity_type] = entity_counts.get(entity_type, 0) + 1
+        return await self._run_db(self._get_knowledge_graph_summary_sync)
 
-            # Count relations by type
+    def _get_knowledge_graph_summary_sync(self) -> dict[str, Any]:
+        """Synchronous implementation of get_knowledge_graph_summary."""
+        if not self._initialized:
+             return {
+                "error": "Knowledge graph not initialized",
+                "total_entities": 0,
+                "total_relations": 0,
+                "entity_types": {},
+                "relation_types": {},
+            }
+
+        try:
+            # Count entities by type using SQL
+            entity_counts = {}
+            query = Entity.select(Entity.entity_type, fn.COUNT(Entity.id).alias('count')).group_by(Entity.entity_type)
+            for row in query:
+                entity_counts[row.entity_type] = row.count
+
+            # Count relations by type using SQL
             relation_counts = {}
-            for relation in self.knowledge_graph["relations"]:
-                relation_type = relation.get("relationType", "Unknown")
-                relation_counts[relation_type] = (
-                    relation_counts.get(relation_type, 0) + 1
-                )
+            query = Relation.select(Relation.relation_type, fn.COUNT(Relation.id).alias('count')).group_by(Relation.relation_type)
+            for row in query:
+                relation_counts[row.relation_type] = row.count
+
+            total_entities = sum(entity_counts.values())
+            total_relations = sum(relation_counts.values())
 
             # Create summary
             summary = {
-                "total_entities": len(self.knowledge_graph["entities"]),
-                "total_relations": len(self.knowledge_graph["relations"]),
+                "total_entities": total_entities,
+                "total_relations": total_relations,
                 "entity_types": entity_counts,
                 "relation_types": relation_counts,
             }
 
             self.logger.info(
-                f"Knowledge graph summary: {len(self.knowledge_graph['entities'])} entities, "
-                f"{len(self.knowledge_graph['relations'])} relations"
+                f"Knowledge graph summary: {total_entities} entities, "
+                f"{total_relations} relations"
             )
 
             return summary
@@ -733,24 +826,34 @@ class GameKnowledgeGraph:
         Returns:
             Dict[str, Any]: The search results
         """
-        try:
-            # Simple implementation that searches entity names and types
-            results = []
+        return await self._run_db(self._search_nodes_sync, query)
 
-            for entity_name, entity_data in self.knowledge_graph["entities"].items():
-                # Check if query matches entity name or type
-                if (
-                    query.lower() in entity_name.lower()
-                    or query.lower() in entity_data.get("entityType", "").lower()
-                ):
-                    # Add entity to results
-                    results.append(
-                        {
-                            "name": entity_name,
-                            "entityType": entity_data.get("entityType", "Unknown"),
-                            "observations": entity_data.get("observations", []),
-                        }
-                    )
+    def _search_nodes_sync(self, search_query: str) -> dict[str, Any]:
+        """Synchronous implementation of search_nodes."""
+        if not self._initialized:
+             self.logger.error("Cannot search nodes: Knowledge graph not initialized.")
+             return {"nodes": []}
+
+        try:
+            # Search entity names and types
+            results = []
+            # Use ILIKE for case-insensitive search if Postgres, else LIKE
+            # Peewee handles generic 'contains' which maps to LIKE/GLOB usually
+            # We use fn.LOWER for cross-db case-insensitive check
+            entities = Entity.select().where(
+                (fn.LOWER(Entity.name).contains(search_query.lower())) |
+                (fn.LOWER(Entity.entity_type).contains(search_query.lower()))
+            )
+
+            for entity in entities:
+                obs_list = [obs.observation_text for obs in entity.observations]
+                results.append(
+                    {
+                        "name": entity.name,
+                        "entityType": entity.entity_type,
+                        "observations": obs_list,
+                    }
+                )
 
             return {"nodes": results}
         except Exception as e:
@@ -766,315 +869,55 @@ class GameKnowledgeGraph:
         Returns:
             Dict[str, Any]: The nodes that were found
         """
+        return await self._run_db(self._open_nodes_sync, names)
+
+    def _open_nodes_sync(self, names: list[str]) -> dict[str, Any]:
+        """Synchronous implementation of open_nodes."""
+        if not self._initialized:
+             self.logger.error("Cannot open nodes: Knowledge graph not initialized.")
+             return {"nodes": []}
+
         try:
             results = []
+            entities = Entity.select().where(Entity.name.in_(names))
 
-            for name in names:
-                if name in self.knowledge_graph["entities"]:
-                    entity_data = self.knowledge_graph["entities"][name]
-                    results.append(
-                        {
-                            "name": name,
-                            "entityType": entity_data.get("entityType", "Unknown"),
-                            "observations": entity_data.get("observations", []),
-                        }
-                    )
+            for entity in entities:
+                obs_list = [obs.observation_text for obs in entity.observations]
+                results.append(
+                    {
+                        "name": entity.name,
+                        "entityType": entity.entity_type,
+                        "observations": obs_list,
+                    }
+                )
 
             return {"nodes": results}
         except Exception as e:
             self.logger.error(f"Error opening nodes: {e}", exc_info=True)
             return {"nodes": []}
 
+    # Legacy/unused methods removed or stubbed
     async def get_world_map(self) -> str:
         """Get a merged map of all explored rooms.
-
-        Returns:
-            str: A merged map of all explored rooms, or a message if no maps found
+        Not implemented for DB yet.
         """
-        try:
-            # Get all room entities from the knowledge graph
-            room_entities = [
-                entity for entity in self.knowledge_graph["entities"].values()
-                if entity.get("entityType") == "Room"
-            ]
+        return "World map generation from DB Not Implemented Yet."
 
-            if not room_entities:
-                return "No rooms found in knowledge graph"
+    async def add_observations(self, data: dict[str, Any]) -> dict[str, Any]:
+        self.logger.warning("add_observations not implemented for DB")
+        return {"success": False}
 
-            # Extract maps from room entities
-            room_maps = {}
-            for room in room_entities:
-                # First check if map is in metadata
-                if "metadata" in room and "map" in room["metadata"]:
-                    map_text = room["metadata"]["map"]
-                    room_maps[room["name"]] = map_text
-                # Fall back to observations if not in metadata
-                elif "observations" in room:
-                    for observation in room["observations"]:
-                        if observation.startswith("Map:"):
-                            # Extract the map from the observation
-                            map_text = observation[4:].strip()  # Remove 'Map:' prefix
-                            room_maps[room["name"]] = map_text
-                            break
-
-            if not room_maps:
-                return "No maps found in knowledge graph"
-
-            # If we only have one map, just return it
-            if len(room_maps) == 1:
-                room_name = list(room_maps.keys())[0]
-                return f"Map for {room_name}:\n\n{room_maps[room_name]}"
-
-            # Basic map merging algorithm
-            # For now, we'll just return the most detailed map (the one with the most lines)
-            most_detailed_map = None
-            most_detailed_room = None
-            max_score = 0
-
-            for room_name, map_text in room_maps.items():
-                lines = map_text.count("\n") + 1
-                map_chars = sum(
-                    1
-                    for c in map_text
-                    if c
-                    in [
-                        "-",
-                        "|",
-                        "+",
-                        "<",
-                        ">",
-                        "[",
-                        "]",
-                        "*",
-                        ".",
-                        "!",
-                        "$",
-                        "#",
-                        "~",
-                        "(",
-                        ")",
-                        "^",
-                        "v",
-                    ]
-                )
-
-                # Score based on number of lines and map characters
-                score = lines * 2 + map_chars
-
-                if score > max_score:
-                    max_score = score
-                    most_detailed_map = map_text
-                    most_detailed_room = room_name
-
-            if most_detailed_map:
-                return f"Most detailed map (from {most_detailed_room}):\n\n{most_detailed_map}\n\nFound maps for {len(room_maps)} rooms."
-
-            # If we couldn't find a good map to display, just list the rooms with maps
-            result = [f"Found maps for {len(room_maps)} rooms:"]
-            for room_name in sorted(room_maps.keys()):
-                result.append(f"- {room_name}")
-
-            return "\n".join(result)
-        except Exception as e:
-            self.logger.error(f"Error getting world map: {e}", exc_info=True)
-            return f"Error getting world map: {e}"
-
-    async def add_observations(
-        self, data: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Add observations to existing entities in the knowledge graph.
-
-        Args:
-            data: A dictionary with the observations to add
-                Format: {"observations": [{"entityName": "name", "contents": ["observation1", "observation2"]}]}
-
-        Returns:
-            Dict[str, Any]: The result of the operation
-        """
-        try:
-            if "observations" not in data:
-                self.logger.error("No observations provided", exc_info=True)
-                return {"success": False}
-
-            for observation_data in data["observations"]:
-                entity_name = observation_data.get("entityName")
-                contents = observation_data.get("contents", [])
-
-                if not entity_name or not contents:
-                    continue
-
-                # Check if entity exists
-                if entity_name not in self.knowledge_graph["entities"]:
-                    self.logger.warning(f"Entity {entity_name} not found, creating it")
-                    self.knowledge_graph["entities"][entity_name] = {
-                        "name": entity_name,
-                        "entityType": "Generic",
-                        "observations": contents,
-                        "metadata": {"last_updated": datetime.now().isoformat()},
-                    }
-                else:
-                    # Add observations to existing entity
-                    entity = self.knowledge_graph["entities"][entity_name]
-
-                    # Ensure observations list exists
-                    if "observations" not in entity:
-                        entity["observations"] = []
-
-                    # Add new observations, avoiding duplicates
-                    for content in contents:
-                        if content not in entity["observations"]:
-                            entity["observations"].append(content)
-
-                    # Update timestamp
-                    if "metadata" not in entity:
-                        entity["metadata"] = {}
-                    entity["metadata"]["last_updated"] = datetime.now().isoformat()
-
-            # Save changes
-            await self.save_knowledge_graph()
-
-            return {"success": True}
-        except Exception as e:
-            self.logger.error(f"Error adding observations: {e}", exc_info=True)
-            return {"success": False}
-
-    async def delete_observations(
-        self, data: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Delete observations from entities in the knowledge graph.
-
-        Args:
-            data: A dictionary with the observations to delete
-                Format: {"deletions": [{"entityName": "name", "observations": ["observation1", "observation2"]}]}
-
-        Returns:
-            Dict[str, Any]: The result of the operation
-        """
-        try:
-            if "deletions" not in data:
-                self.logger.error("No deletions provided", exc_info=True)
-                return {"success": False}
-
-            for deletion_data in data["deletions"]:
-                entity_name = deletion_data.get("entityName")
-                observations = deletion_data.get("observations", [])
-
-                if not entity_name or not observations:
-                    continue
-
-                # Check if entity exists
-                if entity_name not in self.knowledge_graph["entities"]:
-                    self.logger.warning(
-                        f"Entity {entity_name} not found, skipping deletion"
-                    )
-                    continue
-
-                # Delete observations from entity
-                entity = self.knowledge_graph["entities"][entity_name]
-
-                # Ensure observations list exists
-                if "observations" not in entity:
-                    continue
-
-                # Remove observations
-                for observation in observations:
-                    if observation in entity["observations"]:
-                        entity["observations"].remove(observation)
-
-                # Update timestamp
-                if "metadata" not in entity:
-                    entity["metadata"] = {}
-                entity["metadata"]["last_updated"] = datetime.now().isoformat()
-
-            # Save changes
-            await self.save_knowledge_graph()
-
-            return {"success": True}
-        except Exception as e:
-            self.logger.error(f"Error deleting observations: {e}", exc_info=True)
-            return {"success": False}
+    async def delete_observations(self, data: dict[str, Any]) -> dict[str, Any]:
+        self.logger.warning("delete_observations not implemented for DB")
+        return {"success": False}
 
     async def delete_entities(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Delete multiple entities and their associated relations from the knowledge graph.
-
-        Args:
-            data: A dictionary with the entity names to delete
-                Format: {"entityNames": ["name1", "name2"]}
-
-        Returns:
-            Dict[str, Any]: The result of the operation
-        """
-        try:
-            if "entityNames" not in data:
-                self.logger.error("No entity names provided", exc_info=True)
-                return {"success": False}
-
-            entity_names = data["entityNames"]
-
-            # Delete each entity
-            for name in entity_names:
-                if name in self.knowledge_graph["entities"]:
-                    del self.knowledge_graph["entities"][name]
-
-                    # Also delete any relations involving this entity
-                    self.knowledge_graph["relations"] = [
-                        relation
-                        for relation in self.knowledge_graph["relations"]
-                        if relation.get("from") != name and relation.get("to") != name
-                    ]
-
-            # Save changes
-            await self.save_knowledge_graph()
-
-            return {"success": True}
-        except Exception as e:
-            self.logger.error(f"Error deleting entities: {e}", exc_info=True)
-            return {"success": False}
+        self.logger.warning("delete_entities not implemented for DB")
+        return {"success": False}
 
     async def delete_relations(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Delete multiple relations from the knowledge graph.
-
-        Args:
-            data: A dictionary with the relations to delete
-                Format: {"relations": [{"from": "entity1", "to": "entity2", "relationType": "type"}]}
-
-        Returns:
-            Dict[str, Any]: The result of the operation
-        """
-        try:
-            if "relations" not in data:
-                self.logger.error("No relations provided", exc_info=True)
-                return {"success": False}
-
-            relations_to_delete = data["relations"]
-
-            # Delete matching relations
-            for relation_to_delete in relations_to_delete:
-                from_entity = relation_to_delete.get("from")
-                to_entity = relation_to_delete.get("to")
-                relation_type = relation_to_delete.get("relationType")
-
-                if not from_entity or not to_entity or not relation_type:
-                    continue
-
-                # Filter out the matching relations
-                self.knowledge_graph["relations"] = [
-                    relation
-                    for relation in self.knowledge_graph["relations"]
-                    if not (
-                        relation.get("from") == from_entity
-                        and relation.get("to") == to_entity
-                        and relation.get("relationType") == relation_type
-                    )
-                ]
-
-            # Save changes
-            await self.save_knowledge_graph()
-
-            return {"success": True}
-        except Exception as e:
-            self.logger.error(f"Error deleting relations: {e}", exc_info=True)
-            return {"success": False}
+        self.logger.warning("delete_relations not implemented for DB")
+        return {"success": False}
 
     async def read_graph(self, _: dict[str, Any]) -> dict[str, Any]:
         """Read the entire knowledge graph.

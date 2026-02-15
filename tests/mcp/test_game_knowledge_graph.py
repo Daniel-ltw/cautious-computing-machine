@@ -83,7 +83,7 @@ async def test_add_relation(knowledge_graph):
     from_entity = Entity(name="Room")
     to_entity = Entity(name="NPC")
     with patch('mud_agent.db.models.Relation.get_or_create') as mock_get_or_create:
-        knowledge_graph.add_relation(from_entity, to_entity, "contains")
+        await knowledge_graph.add_relation(from_entity, to_entity, "contains")
         mock_get_or_create.assert_called_once_with(
             from_entity=from_entity, to_entity=to_entity, relation_type="contains"
         )
@@ -92,7 +92,7 @@ async def test_add_relation(knowledge_graph):
 async def test_get_entity(knowledge_graph):
     """Test retrieving an entity."""
     with patch('mud_agent.db.models.Entity.get') as mock_get:
-        knowledge_graph.get_entity("Test Entity")
+        await knowledge_graph.get_entity("Test Entity")
         mock_get.assert_called_once()
 
 
@@ -287,6 +287,12 @@ def test_db():
     peewee_db.drop_tables([E, R, RX, NPC, Observation, Relation])
     peewee_db.close()
     Path(test_db_path).unlink()
+
+
+@pytest.mark.asyncio
+async def test_get_room_info_no_retry_decorator(knowledge_graph):
+    """Verify get_room_info_sync is not wrapped in retry logic."""
+    assert not hasattr(knowledge_graph._get_room_info_sync, '__wrapped__')
 
 
 @pytest.mark.asyncio
