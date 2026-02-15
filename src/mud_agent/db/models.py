@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 DB_PATH = Path.cwd() / ".mcp" / "knowledge_graph.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# Initialize database
-db = SqliteDatabase(str(DB_PATH))
+# Always use local SQLite for speed. Supabase sync is handled by SyncWorker.
+logger.info(f"Using SQLite database at {DB_PATH}")
+db = SqliteDatabase(str(DB_PATH), pragmas={'journal_mode': 'wal'})
 
 
 class BaseModel(Model):
@@ -38,13 +39,16 @@ class BaseModel(Model):
 
     created_at = DateTimeField(default=datetime.now)
     updated_at = DateTimeField(default=datetime.now)
+    sync_status = CharField(max_length=10, default="dirty")
+    remote_updated_at = DateTimeField(null=True, default=None)
 
     class Meta:
         database = db
 
     def save(self, *args, **kwargs):
-        """Override save to update the updated_at timestamp."""
+        """Override save to update the updated_at timestamp and mark as dirty."""
         self.updated_at = datetime.now()
+        self.sync_status = "dirty"
         return super().save(*args, **kwargs)
 
 

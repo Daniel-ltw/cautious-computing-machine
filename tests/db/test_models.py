@@ -204,3 +204,23 @@ def test_record_exit_success_with_say_variations(test_db):
     assert details["move_command"] == "say abracadabra"
     assert details["pre_commands"] == []
 
+
+def test_sync_status_defaults_to_dirty(test_db):
+    """New records should default to sync_status='dirty'."""
+    entity = Entity.create(name="Sync Test", entity_type="Room")
+    assert entity.sync_status == "dirty"
+    assert entity.remote_updated_at is None
+
+
+def test_save_sets_sync_status_dirty(test_db):
+    """Saving a synced record should mark it dirty again."""
+    entity = Entity.create(name="Sync Test", entity_type="Room")
+    Entity.update(sync_status="synced").where(Entity.id == entity.id).execute()
+    entity = Entity.get_by_id(entity.id)
+    assert entity.sync_status == "synced"
+
+    entity.name = "Updated Name"
+    entity.save()
+    entity = Entity.get_by_id(entity.id)
+    assert entity.sync_status == "dirty"
+
