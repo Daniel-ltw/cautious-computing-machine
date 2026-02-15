@@ -6,6 +6,28 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+@dataclass
+class DatabaseConfig:
+    """Configuration for the database."""
+
+    url: str | None = None
+    sync_enabled: bool = False
+    sync_interval: float = 30.0
+
+    @classmethod
+    def from_env(cls) -> "DatabaseConfig":
+        """Create a DatabaseConfig from environment variables.
+
+        Returns:
+            DatabaseConfig: A new DatabaseConfig instance.
+        """
+        sync_enabled_raw = os.getenv("SYNC_ENABLED", "false").strip().lower()
+        return cls(
+            url=os.getenv("DATABASE_URL"),
+            sync_enabled=sync_enabled_raw in {"true", "1", "yes"},
+            sync_interval=float(os.getenv("SYNC_INTERVAL", "30")),
+        )
+
 
 @dataclass
 class ModelConfig:
@@ -176,6 +198,7 @@ class Config:
     log: LogConfig
     gmcp: GMCPConfig
     agent: AgentConfig
+    database: DatabaseConfig
 
     @classmethod
     def load(cls) -> "Config":
@@ -190,6 +213,7 @@ class Config:
             log=LogConfig.from_env(),
             gmcp=GMCPConfig.from_env(),
             agent=AgentConfig.from_env(),
+            database=DatabaseConfig.from_env(),
         )
 
     @classmethod
@@ -208,4 +232,5 @@ class Config:
             log=LogConfig.from_env(),
             gmcp=GMCPConfig.from_dict(config.get("gmcp", {})),
             agent=AgentConfig.from_dict(config.get("agent", {})),
+            database=DatabaseConfig.from_env(),  # Always load DB config from env for security
         )

@@ -8,7 +8,7 @@ from unittest.mock import patch
 # Import helper to add src to Python path
 from test_helper import *
 
-from mud_agent.config.config import AgentConfig, Config
+from mud_agent.config.config import AgentConfig, Config, DatabaseConfig
 
 
 class TestAgentConfig:
@@ -69,3 +69,27 @@ class TestConfigWithAgent:
 
             config = Config.from_dict(config_dict)
             assert config.agent.autocast_commands == ["test"]
+
+
+class TestDatabaseConfig:
+    """Tests for the DatabaseConfig class."""
+
+    def test_database_config_defaults(self):
+        """DatabaseConfig should have sync settings with sensible defaults."""
+        config = DatabaseConfig()
+        assert config.sync_enabled is False
+        assert config.sync_interval == 30.0
+        assert config.url is None
+
+    def test_database_config_from_env(self):
+        """DatabaseConfig should load sync settings from environment."""
+        env = {
+            "DATABASE_URL": "postgresql://user:pass@host:5432/db",
+            "SYNC_ENABLED": "true",
+            "SYNC_INTERVAL": "15",
+        }
+        with patch.dict(os.environ, env):
+            config = DatabaseConfig.from_env()
+            assert config.url == "postgresql://user:pass@host:5432/db"
+            assert config.sync_enabled is True
+            assert config.sync_interval == 15.0
