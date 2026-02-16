@@ -4,7 +4,8 @@ import pytest
 import pytest_asyncio
 from peewee import DoesNotExist
 
-from mud_agent.db.models import Entity, Room, RoomExit
+from mud_agent.db.models import ALL_MODELS, Entity, Room, RoomExit
+from mud_agent.db.models import db as peewee_db
 from mud_agent.mcp.game_knowledge_graph import GameKnowledgeGraph
 
 
@@ -273,18 +274,13 @@ def test_db():
     import tempfile
     from pathlib import Path
 
-    from mud_agent.db.models import NPC, Observation, Relation
-    from mud_agent.db.models import Entity as E
-    from mud_agent.db.models import Room as R
-    from mud_agent.db.models import RoomExit as RX
-    from mud_agent.db.models import db as peewee_db
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp_db:
         test_db_path = tmp_db.name
     peewee_db.init(test_db_path)
     peewee_db.connect()
-    peewee_db.create_tables([E, R, RX, NPC, Observation, Relation])
+    peewee_db.create_tables(ALL_MODELS)
     yield
-    peewee_db.drop_tables([E, R, RX, NPC, Observation, Relation])
+    peewee_db.drop_tables(ALL_MODELS)
     peewee_db.close()
     Path(test_db_path).unlink()
 
