@@ -42,8 +42,15 @@ class GameKnowledgeGraph:
         self._initialized = False
 
     async def _run_db(self, func, *args, **kwargs):
-        """Run a blocking database function in a separate thread."""
-        return await asyncio.to_thread(func, *args, **kwargs)
+        """Run a blocking database function in a separate thread.
+
+        Each call gets its own connection context so threads don't collide
+        on SQLite's single-writer lock.
+        """
+        def _wrapper():
+            with db.connection_context():
+                return func(*args, **kwargs)
+        return await asyncio.to_thread(_wrapper)
 
     async def initialize(self) -> None:
         """Initialize the database connection and run migrations."""
