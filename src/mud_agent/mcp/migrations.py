@@ -134,6 +134,14 @@ class MigrationManager:
             down_func=self._migration_011_down
         ))
 
+        # Migration 012: Add sync tracking columns
+        self.migrations.append(Migration(
+            version=12,
+            description="Add sync_status and remote_updated_at columns for Supabase sync",
+            up_func=self._migration_012_up,
+            down_func=self._migration_012_down
+        ))
+
     def _get_schema_version(self) -> int:
         """Get the current schema version from the database."""
         try:
@@ -522,6 +530,36 @@ class MigrationManager:
             print("✓ Dropped details column from Room table")
         except Exception as e:
             print(f"⚠ Could not drop details column (might need table rebuild): {e}")
+
+    def _migration_012_up(self):
+        """Migration 012: Add sync tracking columns to all tables."""
+        tables = ['entity', 'room', 'roomexit', 'npc', 'observation', 'relation']
+        for table in tables:
+            with db.atomic():
+                try:
+                    db.execute_sql(
+                        f"ALTER TABLE {table} ADD COLUMN sync_status VARCHAR(10) NOT NULL DEFAULT 'dirty'"
+                    )
+                except Exception:
+                    pass  # Column likely exists
+                try:
+                    db.execute_sql(
+                        f"ALTER TABLE {table} ADD COLUMN remote_updated_at DATETIME"
+                    )
+                except Exception:
+                    pass  # Column likely exists
+        print("✓ Added sync_status and remote_updated_at columns to all tables")
+
+    def _migration_012_down(self):
+        """Migration 012 rollback: Remove sync tracking columns."""
+        tables = ['entity', 'room', 'roomexit', 'npc', 'observation', 'relation']
+        for table in tables:
+            try:
+                with db.atomic():
+                    db.execute_sql(f"ALTER TABLE {table} DROP COLUMN sync_status")
+                    db.execute_sql(f"ALTER TABLE {table} DROP COLUMN remote_updated_at")
+            except Exception as e:
+                print(f"⚠ Could not drop sync columns from {table}: {e}")
 
     def _migration_002_down(self):
         """Migration 002 rollback: Remove composite unique constraint."""
