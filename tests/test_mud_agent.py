@@ -199,3 +199,30 @@ async def test_get_knowledge_graph_summary(mud_agent):
     # Verify the knowledge graph manager was called
     mud_agent.mcp_manager.get_knowledge_graph_summary_formatted.assert_called_once()
     assert result == "Test summary"
+
+
+def test_sync_worker_created_when_enabled(config):
+    """SyncWorker should be created when sync_enabled is True and DATABASE_URL is set."""
+    config.database.sync_enabled = True
+    config.database.url = "postgresql://user:pass@host/db"
+    config.database.sync_interval = 10.0
+
+    with patch("mud_agent.agent.mud_agent.SyncWorker") as MockSyncWorker:
+        mock_worker = MagicMock()
+        MockSyncWorker.return_value = mock_worker
+
+        with patch("smolagents.LiteLLMModel"):
+            agent = MUDAgent(config)
+
+        assert agent.sync_worker is not None
+        MockSyncWorker.assert_called_once_with(sync_interval=10.0)
+
+
+def test_sync_worker_not_created_when_disabled(config):
+    """SyncWorker should not be created when sync_enabled is False."""
+    config.database.sync_enabled = False
+
+    with patch("smolagents.LiteLLMModel"):
+        agent = MUDAgent(config)
+
+    assert agent.sync_worker is None

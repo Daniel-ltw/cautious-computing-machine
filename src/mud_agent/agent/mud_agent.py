@@ -24,6 +24,7 @@ from .decision_engine import DecisionEngine
 from .npc_manager import NPCManager
 from .quest_manager import QuestManager
 from .room_manager import RoomManager
+from ..db.sync_worker import SyncWorker
 
 
 class MUDAgent:
@@ -107,6 +108,12 @@ class MUDAgent:
         # Initialize command processor to None for lazy loading
         self._command_processor = None
 
+        # Initialize sync worker if configured
+        self.sync_worker = None
+        if config.database.sync_enabled and config.database.url:
+            self.sync_worker = SyncWorker(sync_interval=config.database.sync_interval)
+            self.logger.info("SyncWorker configured for background sync")
+
         self.logger.debug("MUD agent initialized")
 
     async def setup_managers(self):
@@ -159,6 +166,10 @@ class MUDAgent:
         # Start the periodic GMCP update task
         self.gmcp_update_task = asyncio.create_task(self._periodic_gmcp_update())
 
+        # Start background sync if configured
+        if self.sync_worker and self.config.database.url:
+            await self.sync_worker.start(self.config.database.url)
+
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -190,6 +201,11 @@ class MUDAgent:
         # Stop the tick manager
         self.tick_manager.stop()
         self.logger.info("Stopped tick manager")
+
+        # Stop sync worker
+        if self.sync_worker:
+            await self.sync_worker.stop()
+            self.logger.info("Stopped SyncWorker")
 
         # Stop MCP manager
         await self.mcp_manager.stop_server()
