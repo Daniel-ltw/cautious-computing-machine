@@ -3,12 +3,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
-import asyncio
-from unittest.mock import patch, MagicMock
-from peewee import SqliteDatabase
 from mud_agent.db.models import Room, RoomExit, Entity, find_path_between_rooms, ALL_MODELS
 from mud_agent.db.models import db as peewee_db
-# Import GameKnowledgeGraph but we will patch the db it uses
 from mud_agent.mcp.game_knowledge_graph import GameKnowledgeGraph
 
 
