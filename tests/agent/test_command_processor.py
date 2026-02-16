@@ -48,23 +48,23 @@ class TestCommandProcessor:
         result = await self.processor.process_command("north")
 
         assert result == "Test response"
-        self.agent.mud_tool.forward.assert_called_once_with("north", is_user_command=False)
+        self.agent.mud_tool.forward.assert_called_once_with("north")
         # Direct call to room_manager removed, event emission handles it now
 
     @pytest.mark.asyncio
-    async def test_process_command_user_command_flag(self):
-        """Test that user command flag is passed through."""
-        result = await self.processor.process_command("kill goblin", is_user_command=True)
+    async def test_process_command_speedwalk_flag(self):
+        """Test that speedwalk flag is passed through to event emission."""
+        result = await self.processor.process_command("run 2n", is_speedwalk=True)
 
         assert result == "Test response"
-        self.agent.mud_tool.forward.assert_called_once_with("kill goblin", is_user_command=True)
+        self.agent.events.emit.assert_called_with("command_sent", command="run 2n", from_room_num=None, is_speedwalk=True)
 
     @pytest.mark.asyncio
     async def test_process_command_emits_event(self):
         """Test that command_sent event is emitted."""
         await self.processor.process_command("south")
 
-        self.agent.events.emit.assert_called_with("command_sent", command="south", from_room_num=None)
+        self.agent.events.emit.assert_called_with("command_sent", command="south", from_room_num=None, is_speedwalk=False)
 
     @pytest.mark.asyncio
     async def test_process_command_stores_last_command(self):
@@ -220,7 +220,7 @@ class TestCommandProcessor:
         await self.processor.process_command("north")
 
         self.room_manager._get_current_room_num.assert_called()
-        self.agent.events.emit.assert_called_with("command_sent", command="north", from_room_num=12345)
+        self.agent.events.emit.assert_called_with("command_sent", command="north", from_room_num=12345, is_speedwalk=False)
 
     @pytest.mark.asyncio
     async def test_queued_commands_processing(self):
@@ -280,7 +280,7 @@ class TestCommandProcessor:
         await self.processor.process_command("recall")
 
         # verify that the command sent was the replaced one
-        self.agent.mud_tool.forward.assert_called_once_with("wear amu;enter;dual sun", is_user_command=False)
+        self.agent.mud_tool.forward.assert_called_once_with("wear amu;enter;dual sun")
 
     @pytest.mark.asyncio
     async def test_process_command_no_recall_interception(self):
@@ -291,4 +291,4 @@ class TestCommandProcessor:
         await self.processor.process_command("recall")
 
         # verify that the command sent was original "recall"
-        self.agent.mud_tool.forward.assert_called_once_with("recall", is_user_command=False)
+        self.agent.mud_tool.forward.assert_called_once_with("recall")

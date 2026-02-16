@@ -26,12 +26,12 @@ class CommandProcessor:
         self.logger = logging.getLogger(__name__)
         self.room_manager = room_manager
 
-    async def process_command(self, command: str, is_user_command: bool = False) -> str:
+    async def process_command(self, command: str, is_speedwalk: bool = False) -> str:
         """Process a command and return the response.
 
         Args:
             command: The command to process. Can contain multiple commands separated by semicolons.
-            is_user_command: Whether this command was initiated by the user (high priority)
+            is_speedwalk: Whether this command is part of a speedwalk sequence
 
         Returns:
             str: The response from the MUD server
@@ -42,11 +42,11 @@ class CommandProcessor:
                 sub_commands = [cmd.strip() for cmd in command.split(";") if cmd.strip()]
                 responses = []
                 for sub_cmd in sub_commands:
-                    response = await self._process_single_command(sub_cmd, is_user_command)
+                    response = await self._process_single_command(sub_cmd, is_speedwalk=is_speedwalk)
                     responses.append(response)
                 return "\n".join(responses)
             else:
-                return await self._process_single_command(command, is_user_command)
+                return await self._process_single_command(command, is_speedwalk=is_speedwalk)
 
         except Exception as e:
             error_msg = f"Error processing command: {e}"
@@ -54,13 +54,13 @@ class CommandProcessor:
             return error_msg
 
     async def _process_single_command(
-        self, command: str, is_user_command: bool = False
+        self, command: str, is_speedwalk: bool = False
     ) -> str:
         """Process a single command and return the response.
 
         Args:
             command: The single command to process
-            is_user_command: Whether this command was initiated by the user (high priority)
+            is_speedwalk: Whether this command is part of a speedwalk sequence
 
         Returns:
             str: The response from the MUD server
@@ -84,7 +84,7 @@ class CommandProcessor:
 
             # Emit the command_sent event before processing
             if hasattr(self.agent, "events"):
-                await self.agent.events.emit("command_sent", command=command, from_room_num=from_room_num)
+                await self.agent.events.emit("command_sent", command=command, from_room_num=from_room_num, is_speedwalk=is_speedwalk)
 
             # Store the last command
             self.agent.last_command = command
@@ -93,10 +93,8 @@ class CommandProcessor:
             # call to `capture_outgoing_command` is no longer needed and has been removed
             # to prevent a race condition that was clearing pre-commands.
 
-            # Send the command to the MUD server with priority flag
-            response = await self.agent.mud_tool.forward(
-                command, is_user_command=is_user_command
-            )
+            # Send the command to the MUD server
+            response = await self.agent.mud_tool.forward(command)
 
             # After sending the command, the 'command_sent' event (with from_room_num) has already been emitted.
             # The RoomManager will handle the command via the event listener, so no direct call is needed.

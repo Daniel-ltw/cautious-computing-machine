@@ -581,3 +581,20 @@ async def test_rapid_room_changes(manager, mock_agent):
     # Should have recorded 3 exits
     assert mock_agent.knowledge_graph.record_exit_success.call_count == 3
 
+
+@pytest.mark.asyncio
+async def test_speedwalk_suppresses_exit_recording(manager, mock_agent):
+    """Speedwalk commands should NOT record exits."""
+    manager.current_room = {"num": 1, "name": "Start Room"}
+
+    # Simulate speedwalk command — is_speedwalk=True should be in kwargs
+    await manager._handle_command_sent(command="run 2n", is_speedwalk=True)
+
+    # pending_exit should NOT be set
+    assert manager.pending_exit_command is None
+
+    # Room update should NOT trigger recording
+    await manager._on_room_update(room_data={"num": 3, "name": "Room 3"})
+
+    mock_agent.knowledge_graph.record_exit_success.assert_not_called()
+

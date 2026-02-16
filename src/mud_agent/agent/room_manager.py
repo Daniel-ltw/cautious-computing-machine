@@ -68,6 +68,14 @@ class RoomManager:
             self.logger.warning("command_sent event received with no command")
             return
 
+        is_speedwalk = kwargs.get('is_speedwalk', False)
+        if is_speedwalk:
+            self.logger.debug(f"Speedwalk command '{command}' — suppressing exit recording")
+            self.pending_exit_command = None
+            self.from_room_num_on_exit = None
+            self.pending_pre_commands.clear()
+            return
+
         cmd_lower = command.lower().strip()
 
         self.logger.debug(f"Handling command_sent: '{cmd_lower}', from_room_num={from_room_num_captured}")
@@ -85,6 +93,14 @@ class RoomManager:
 
         pending_exit = None
         for tok in tokens:
+            # Safety: "run" commands from Aardwolf speedwalk should never set pending exit
+            if tok.startswith("run "):
+                self.logger.debug(f"Run command '{tok}' detected — clearing pending exit state")
+                self.pending_exit_command = None
+                self.from_room_num_on_exit = None
+                self.pending_pre_commands.clear()
+                continue
+
             if tok.startswith("say "):
                 self.logger.info(f"Say command detected: '{tok}' - triggering force exit check from room {self.current_room.get('num') if self.current_room else 'unknown'}")
                 asyncio.create_task(self.events.emit("force_exit_check", command=tok))
