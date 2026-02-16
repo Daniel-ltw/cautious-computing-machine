@@ -479,20 +479,31 @@ async def test_exception_in_record_exit_success_handled(manager, mock_agent):
 
 
 @pytest.mark.asyncio
-async def test_non_movement_command_clears_pending_exit(manager, mock_agent):
-    """Test that non-movement commands clear pending exit."""
+async def test_non_movement_command_does_not_clear_pending_exit(manager, mock_agent):
+    """Non-movement commands like 'look' should NOT clear pending exit state.
+
+    This is important for lag tolerance: a 'look' typed after 'north' shouldn't
+    prevent the room transition from being recorded when the GMCP update arrives.
+    """
     manager.current_room = {"num": 1, "name": "Room"}
 
-    await manager._handle_command_sent(command="north")
+    await manager._handle_command_sent(command="north", from_room_num=1)
     assert manager.pending_exit_command == "north"
 
-    # Send non-movement command
+    # Send non-movement command — should NOT clear pending
     await manager._handle_command_sent(command="look")
+    assert manager.pending_exit_command == "north"
 
-    # Room update should not record exit
+    # Room update should still record the exit from the 'north' command
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 
-    mock_agent.knowledge_graph.record_exit_success.assert_not_called()
+    mock_agent.knowledge_graph.record_exit_success.assert_called_once_with(
+        from_room_num=1,
+        to_room_num=2,
+        direction="north",
+        move_cmd="north",
+        pre_cmds=[],
+    )
 
 
 @pytest.mark.asyncio
