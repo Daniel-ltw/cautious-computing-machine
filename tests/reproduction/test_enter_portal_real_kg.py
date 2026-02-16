@@ -1,20 +1,26 @@
 
+import tempfile
+from pathlib import Path
+
 import pytest
 import asyncio
 from unittest.mock import MagicMock, AsyncMock
 from mud_agent.agent.room_manager import RoomManager
 from mud_agent.mcp.game_knowledge_graph import GameKnowledgeGraph
-from mud_agent.db.models import db, Room, RoomExit, Entity
+from mud_agent.db.models import ALL_MODELS, db, Room, RoomExit, Entity
 
 @pytest.mark.asyncio
 class TestEnterPortalRealKG:
     async def test_enter_portal_full_stack(self):
         """Test 'enter rubble' with real GameKnowledgeGraph and in-memory DB."""
 
-        # 1. Setup In-Memory DB
-        db.init(":memory:")
+        # 1. Setup DB with temp file (not :memory:) so asyncio.to_thread can access it
+        tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        test_db_path = tmp.name
+        tmp.close()
+        db.init(test_db_path)
         db.connect()
-        db.create_tables([Room, RoomExit, Entity])
+        db.create_tables(ALL_MODELS)
 
         # 2. Setup GameKnowledgeGraph
         kg = GameKnowledgeGraph()
@@ -106,3 +112,4 @@ class TestEnterPortalRealKG:
 
         # Teardown
         db.close()
+        Path(test_db_path).unlink(missing_ok=True)

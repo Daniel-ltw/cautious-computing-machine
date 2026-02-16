@@ -1,52 +1,36 @@
 
+import tempfile
+from pathlib import Path
+
 import pytest
 import asyncio
 from unittest.mock import patch, MagicMock
 from peewee import SqliteDatabase
 from mud_agent.db.models import Room, RoomExit, Entity, find_path_between_rooms, ALL_MODELS
+from mud_agent.db.models import db as peewee_db
 # Import GameKnowledgeGraph but we will patch the db it uses
 from mud_agent.mcp.game_knowledge_graph import GameKnowledgeGraph
 
-# Use an in-memory database for testing
-test_db_instance = SqliteDatabase(':memory:')
 
 @pytest.fixture
 def test_database():
-    # Bind models to test database
-    test_db_instance.bind(ALL_MODELS, bind_refs=False, bind_backrefs=False)
-    test_db_instance.connect()
-    test_db_instance.create_tables(ALL_MODELS)
+    # Use a temp file so that asyncio.to_thread can access the same DB
+    tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+    test_db_path = tmp.name
+    tmp.close()
 
-    # Patch db in models and game_knowledge_graph
-    # We need to patch where it is imported/used
-    p1 = patch('mud_agent.db.models.db', test_db_instance)
-    p2 = patch('mud_agent.mcp.game_knowledge_graph.db', test_db_instance)
+    peewee_db.init(test_db_path)
+    peewee_db.connect()
+    peewee_db.create_tables(ALL_MODELS)
 
-    # Patch DatabaseContext to prevent closing the in-memory db
-    class MockContext:
-        def __enter__(self):
-            return None
-        def __exit__(self, *args):
-            pass
+    yield peewee_db
 
-    p3 = patch('mud_agent.db.models.DatabaseContext', MockContext)
-
-    p1.start()
-    p2.start()
-    p3.start()
-
-    yield test_db_instance
-
-    p1.stop()
-    p2.stop()
-    p3.stop()
-
-    test_db_instance.drop_tables(ALL_MODELS)
-    test_db_instance.close()
+    peewee_db.drop_tables(ALL_MODELS)
+    peewee_db.close()
+    Path(test_db_path).unlink(missing_ok=True)
 
 @pytest.fixture
 def knowledge_graph(test_database):
-    # We don't need async fixture here if we just instantiate it
     kg = GameKnowledgeGraph()
     kg._initialized = True
     return kg
