@@ -31,7 +31,10 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # Always use local SQLite for speed. Supabase sync is handled by SyncWorker.
 logger.info(f"Using SQLite database at {DB_PATH}")
-db = SqliteDatabase(str(DB_PATH), pragmas={'journal_mode': 'wal'})
+db = SqliteDatabase(str(DB_PATH), pragmas={
+    'journal_mode': 'wal',
+    'busy_timeout': 5000,  # Wait up to 5s for locks instead of failing immediately
+})
 
 
 class BaseModel(Model):
