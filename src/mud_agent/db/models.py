@@ -310,7 +310,7 @@ class RoomExit(BaseModel):
         if not force and norm_dir != norm_cmd and not move_command.strip().lower().endswith(self.direction.strip().lower()):
             return
 
-        if norm_cmd != "enter" and self.from_room and self.from_room.zone:
+        if self.from_room and self.from_room.zone:
             # Check if this command is already used by another exit in the same area
             try:
                 # Define standard directions to exclude from collision checks
@@ -333,8 +333,8 @@ class RoomExit(BaseModel):
                         continue
                     other_details = exit.get_command_details()
                     other_move = other_details.get("move_command")
-                    if other_move and _norm(other_move) == norm_cmd:
-                        logger.info(f"Skipping save: Command '{norm_cmd}' (raw: '{move_command}') already used in area '{self.from_room.zone}' by exit from room {exit.from_room.room_number}")
+                    if other_move and other_move.strip().lower() == move_command.strip().lower():
+                        logger.info(f"Skipping save: Command '{move_command}' already used in area '{self.from_room.zone}' by exit from room {exit.from_room.room_number}")
                         return
             except Exception as e:
                 logger.error(f"Error checking for duplicate area commands: {e}", exc_info=True)

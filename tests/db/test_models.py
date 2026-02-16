@@ -212,6 +212,32 @@ def test_sync_status_defaults_to_dirty(test_db):
     assert entity.remote_updated_at is None
 
 
+def test_record_exit_success_distinct_enter_commands(test_db):
+    """Different 'enter X' commands in the same zone should NOT collide."""
+    entity1 = Entity.create(name="1", entity_type="Room")
+    room1 = Room.create(entity=entity1, room_number=1, zone="TestZone", terrain="city")
+
+    entity2 = Entity.create(name="2", entity_type="Room")
+    room2 = Room.create(entity=entity2, room_number=2, zone="TestZone", terrain="city")
+
+    entity3 = Entity.create(name="3", entity_type="Room")
+    room3 = Room.create(entity=entity3, room_number=3, zone="TestZone", terrain="city")
+
+    # Create two exits from room1 with different enter commands
+    exit_hut = RoomExit.create(from_room=room1, direction="enter hut", to_room=room2, to_room_number=2)
+    exit_rubble = RoomExit.create(from_room=room1, direction="enter rubble", to_room=room3, to_room_number=3)
+
+    # Record success for "enter hut"
+    exit_hut.record_exit_success(move_command="enter hut")
+    details_hut = exit_hut.get_command_details()
+    assert details_hut["move_command"] == "enter hut"
+
+    # Record success for "enter rubble" — should NOT be blocked by collision with "enter hut"
+    exit_rubble.record_exit_success(move_command="enter rubble")
+    details_rubble = exit_rubble.get_command_details()
+    assert details_rubble["move_command"] == "enter rubble"
+
+
 def test_save_sets_sync_status_dirty(test_db):
     """Saving a synced record should mark it dirty again."""
     entity = Entity.create(name="Sync Test", entity_type="Room")
