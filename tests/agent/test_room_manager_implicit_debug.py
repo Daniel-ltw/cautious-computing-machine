@@ -30,8 +30,10 @@ class TestRoomManagerImplicitDebug:
         print("\nStep 1: Sending command 'enter pool'")
         await manager._handle_command_sent(command="enter pool", from_room_num=1)
 
-        # Verify force_exit_check was emitted
-        mock_agent.events.emit.assert_called_with("force_exit_check", command="enter pool")
+        # After startswith_commands expansion, "enter pool" is now caught in the token loop
+        # and sets pending_exit_command directly instead of going through force_exit_check
+        assert manager.pending_exit_command == "enter pool"
+        assert manager.from_room_num_on_exit == 1
 
         # 2. Simulate force_exit_check handler
         # We need to simulate the room change happening during the sleep

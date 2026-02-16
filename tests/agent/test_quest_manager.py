@@ -145,11 +145,15 @@ class TestQuestManager:
         self.agent.room_manager = MagicMock()
         self.agent.room_manager.generate_speedwalk_command = MagicMock(return_value="n")
         self.agent.state_manager.room_num = 1234
+        # find_and_hunt_npcs is awaited, so it must be an AsyncMock
+        self.agent.find_and_hunt_npcs = AsyncMock(return_value=True)
 
         result = await self.quest_manager.hunt_quest_target(use_speedwalk=True)
 
         assert result is True
-        self.agent.npc_manager.find_and_navigate_to_npc.assert_called()
+        self.agent.find_and_hunt_npcs.assert_called_with(
+            "goblin", True
+        )
 
     @pytest.mark.asyncio
     async def test_hunt_quest_target_no_target(self):
@@ -178,15 +182,15 @@ class TestQuestManager:
         )
         self.agent.room_manager = MagicMock()
         self.agent.room_manager.generate_speedwalk_command = MagicMock(return_value="s")
+        self.agent.room_manager.current_room = {"name": "Questor Room"}
         self.agent.state_manager.room_num = 1234
 
         result = await self.quest_manager.complete_quest()
 
         assert result is True
-        # Should navigate to questor and complete quest
-        self.agent.npc_manager.find_and_navigate_to_npc.assert_called_with(
-            "questor", use_speedwalk=True
-        )
+        # find_questor navigates via knowledge graph path (speedwalk),
+        # then complete_quest sends "quest complete"
+        self.agent.send_command.assert_any_call("quest complete")
 
     @pytest.mark.asyncio
     async def test_complete_quest_cannot_find_questor(self):
@@ -353,6 +357,22 @@ class TestQuestManager:
     @pytest.mark.asyncio
     async def test_quest_workflow_full_cycle(self):
         """Test complete quest workflow from start to finish."""
+        # Setup knowledge_graph mocks for async calls
+        self.agent.knowledge_graph = MagicMock()
+        self.agent.knowledge_graph.find_room_with_npc = AsyncMock(
+            return_value={"name": "Questor Room"}
+        )
+        self.agent.knowledge_graph.find_path_between_rooms = AsyncMock(
+            return_value={"path": ["north", "east"]}
+        )
+        self.agent.knowledge_graph.find_npcs_in_room = AsyncMock(
+            return_value=[{"name": "questor"}]
+        )
+        self.agent.room_manager = MagicMock()
+        self.agent.room_manager.generate_speedwalk_command = MagicMock(return_value="2ne")
+        self.agent.room_manager.current_room = {"name": "Questor Room"}
+        self.agent.state_manager.room_num = 1234
+
         # 1. Find questor
         find_result = await self.quest_manager.find_questor()
         assert find_result is True
@@ -373,15 +393,37 @@ class TestQuestManager:
 
     @pytest.mark.asyncio
     async def test_speedwalk_parameter_propagation(self):
-        """Test that speedwalk parameter is properly passed through."""
-        # Test with speedwalk=True
-        await self.quest_manager.find_questor(use_speedwalk=True)
-        self.agent.npc_manager.find_and_navigate_to_npc.assert_called_with(
-            "questor", use_speedwalk=True
-        )
+        """Test that speedwalk parameter is properly passed through.
 
-        # Test with speedwalk=False
-        await self.quest_manager.find_questor(use_speedwalk=False)
-        self.agent.npc_manager.find_and_navigate_to_npc.assert_called_with(
-            "questor", use_speedwalk=False
+        When the knowledge graph knows the questor's room, find_questor navigates
+        via the KG path. With use_speedwalk=True it uses generate_speedwalk_command;
+        with use_speedwalk=False it navigates step by step.
+        """
+        # Setup knowledge_graph for both find_questor calls
+        self.agent.knowledge_graph = MagicMock()
+        self.agent.knowledge_graph.find_room_with_npc = AsyncMock(
+            return_value={"name": "Questor Room"}
         )
+        self.agent.knowledge_graph.find_path_between_rooms = AsyncMock(
+            return_value={"path": ["north"]}
+        )
+        self.agent.knowledge_graph.find_npcs_in_room = AsyncMock(
+            return_value=[{"name": "questor"}]
+        )
+        self.agent.room_manager = MagicMock()
+        self.agent.room_manager.generate_speedwalk_command = MagicMock(return_value="n")
+        self.agent.room_manager.current_room = {"name": "Questor Room"}
+        self.agent.state_manager.room_num = 1234
+
+        # Test with speedwalk=True — should use generate_speedwalk_command
+        await self.quest_manager.find_questor(use_speedwalk=True)
+        self.agent.room_manager.generate_speedwalk_command.assert_called_with(["north"])
+
+        # Reset mocks and questor_room for second call
+        self.agent.send_command.reset_mock()
+        self.agent.room_manager.generate_speedwalk_command.reset_mock()
+        self.quest_manager.questor_room = None
+
+        # Test with speedwalk=False — should navigate step by step (send "north" directly)
+        await self.quest_manager.find_questor(use_speedwalk=False)
+        self.agent.send_command.assert_any_call("north")

@@ -24,8 +24,8 @@ class TestCommandProcessorSplitting:
 
         # Verify _process_single_command was called twice
         assert processor._process_single_command.call_count == 2
-        processor._process_single_command.assert_any_call("n", False)
-        processor._process_single_command.assert_any_call("s", False)
+        processor._process_single_command.assert_any_call("n", is_speedwalk=False)
+        processor._process_single_command.assert_any_call("s", is_speedwalk=False)
 
         # Verify response is joined
         assert response == "Response 1\nResponse 2"
@@ -43,7 +43,7 @@ class TestCommandProcessorSplitting:
         response = await processor.process_command("look")
 
         # Verify _process_single_command was called once
-        processor._process_single_command.assert_called_once_with("look", False)
+        processor._process_single_command.assert_called_once_with("look", is_speedwalk=False)
 
         # Verify response
         assert response == "Response"

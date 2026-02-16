@@ -16,7 +16,7 @@ class TestRoomManagerImplicitLimit:
     """Tests for limiting implicit room change commands."""
 
     async def test_handle_command_sent_triggers_check_for_whitelisted_cmd(self):
-        """Test that whitelisted commands trigger force_exit_check."""
+        """Test that whitelisted commands set pending_exit_command directly via startswith_commands."""
         agent = MagicMock()
         events = MagicMock()
         events.emit = AsyncMock()
@@ -31,8 +31,11 @@ class TestRoomManagerImplicitLimit:
         # Test "enter portal"
         await manager._handle_command_sent("enter portal")
 
-        # Verify force_exit_check was emitted
-        events.emit.assert_called_with("force_exit_check", command="enter portal")
+        # After startswith_commands expansion, "enter portal" is now caught in the
+        # token loop and sets pending_exit_command directly instead of going through
+        # force_exit_check
+        assert manager.pending_exit_command == "enter portal"
+        assert manager.from_room_num_on_exit == 1
 
     async def test_handle_command_sent_ignores_non_whitelisted_cmd(self):
         """Test that non-whitelisted commands do NOT trigger force_exit_check."""
