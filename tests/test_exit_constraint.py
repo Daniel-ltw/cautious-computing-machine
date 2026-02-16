@@ -1,19 +1,23 @@
 
-import pytest
-from peewee import SqliteDatabase, IntegrityError
-from mud_agent.db.models import Room, RoomExit, Entity, ALL_MODELS
+import tempfile
+from pathlib import Path
 
-# Use an in-memory database for testing
-test_db = SqliteDatabase(':memory:')
+import pytest
+from mud_agent.db.models import Room, RoomExit, Entity, ALL_MODELS
+from mud_agent.db.models import db as peewee_db
+
 
 @pytest.fixture
 def test_database():
-    test_db.bind(ALL_MODELS, bind_refs=False, bind_backrefs=False)
-    test_db.connect()
-    test_db.create_tables(ALL_MODELS)
-    yield test_db
-    test_db.drop_tables(ALL_MODELS)
-    test_db.close()
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+        test_db_path = tmp.name
+    peewee_db.init(test_db_path)
+    peewee_db.connect()
+    peewee_db.create_tables(ALL_MODELS)
+    yield peewee_db
+    peewee_db.drop_tables(ALL_MODELS)
+    peewee_db.close()
+    Path(test_db_path).unlink(missing_ok=True)
 
 def test_multiple_exits_to_same_room(test_database):
     """Test that multiple exits to the same destination are correctly handled via upsert/update."""
@@ -47,4 +51,3 @@ def test_multiple_exits_to_same_room(test_database):
     assert exit2.id != exit1.id
     assert exit2.direction == "enter portal"
     assert exit2.to_room_number == 2
-
