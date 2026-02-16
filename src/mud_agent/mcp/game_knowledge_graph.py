@@ -6,6 +6,7 @@ leveraging an SQLite database via the Peewee ORM for robust and efficient data s
 
 import asyncio
 import logging
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -36,6 +37,8 @@ class GameKnowledgeGraph:
     creating, retrieving, and relating entities (Rooms, NPCs) using a Peewee ORM.
     """
 
+    _db_lock = threading.Lock()
+
     def __init__(self):
         """Initialize the Game Knowledge Graph Manager."""
         self.logger = logging.getLogger(__name__)
@@ -44,22 +47,26 @@ class GameKnowledgeGraph:
     async def _run_db(self, func, *args, **kwargs):
         """Run a blocking database function in a separate thread.
 
-        Each call gets its own connection context so threads don't collide
-        on SQLite's single-writer lock.
+        Uses a lock to serialize all DB access — SQLite only supports
+        one writer at a time, so concurrent threads would deadlock.
         """
         def _wrapper():
-            with db.connection_context():
-                return func(*args, **kwargs)
+            with self._db_lock:
+                with db.connection_context():
+                    return func(*args, **kwargs)
         return await asyncio.to_thread(_wrapper)
 
     async def initialize(self) -> None:
         """Initialize the database connection and run migrations."""
         try:
+            # Open connection for migrations, then close it.
+            # All subsequent access goes through _run_db which manages
+            # its own per-call connections via connection_context().
             if db.is_closed():
                 db.connect()
-                self.logger.info("Database connection opened.")
-
             DatabaseMigrator.run_migrations()
+            if not db.is_closed():
+                db.close()
             self._initialized = True
             self.logger.info("Game knowledge graph initialized successfully.")
         except Exception as e:
