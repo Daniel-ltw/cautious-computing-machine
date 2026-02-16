@@ -202,7 +202,10 @@ async def test_directionless_move_with_semicolon_chain(manager, mock_agent):
     """Test that portal enter in a chained command is captured."""
     manager.current_room = {"num": 1, "name": "Starting Room"}
 
-    await manager._handle_command_sent(command="unlock portal; enter portal")
+    await manager._handle_command_sent(command="unlock portal; enter portal", from_room_num=1)
+
+    assert manager.pending_exit_command == "enter portal"
+    assert "unlock portal" in manager.pending_pre_commands
 
     await manager._on_room_update(room_data={"num": 2, "name": "New Room"})
 

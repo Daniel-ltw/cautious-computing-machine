@@ -84,7 +84,10 @@ class RoomManager:
             "n", "s", "e", "w", "u", "d",
             "north", "south", "east", "west", "up", "down",
         ]
-        startswith_commands = ["escape"]
+        startswith_commands = [
+            "escape", "enter ", "board", "climb", "crawl",
+            "leave", "descend", "ascend",
+        ]
         pre_command_verbs = [
             "open", "unlock", "pick", "bash", "break", "kick", "force", "unbar", "unlatch",
         ]
