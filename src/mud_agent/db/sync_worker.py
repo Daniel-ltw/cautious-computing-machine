@@ -90,8 +90,8 @@ class SyncWorker:
         try:
             while True:
                 try:
-                    await asyncio.to_thread(self.push)
-                    await asyncio.to_thread(self.pull)
+                    await asyncio.to_thread(self._push_with_connection)
+                    await asyncio.to_thread(self._pull_with_connection)
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -99,6 +99,16 @@ class SyncWorker:
                 await asyncio.sleep(self.sync_interval)
         except asyncio.CancelledError:
             self.logger.info("SyncWorker loop cancelled.")
+
+    def _push_with_connection(self) -> None:
+        """Push with a dedicated local DB connection for thread safety."""
+        with local_db.connection_context():
+            self.push()
+
+    def _pull_with_connection(self) -> None:
+        """Pull with a dedicated local DB connection for thread safety."""
+        with local_db.connection_context():
+            self.pull()
 
     def push(self) -> None:
         """Push all dirty local records to the remote database."""
