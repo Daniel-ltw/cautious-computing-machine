@@ -12,7 +12,8 @@ dependencies = [
     "asyncio>=3.4.3",
     "textual",
     "aiofiles>=23.2.1",
-    "peewee"
+    "peewee",
+    "psycopg2-binary"
 ]
 
 [project.optional-dependencies]
