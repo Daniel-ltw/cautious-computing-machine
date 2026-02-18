@@ -17,6 +17,7 @@ from mud_agent.db.models import (
     Entity,
     Room,
     RoomExit,
+    SyncDelete,
     db as local_db,
 )
 from mud_agent.db.sync_models import (
@@ -24,6 +25,7 @@ from mud_agent.db.sync_models import (
     RemoteEntity,
     RemoteRoom,
     RemoteRoomExit,
+    RemoteSyncDelete,
 )
 from mud_agent.db.sync_worker import SyncWorker
 
@@ -199,3 +201,96 @@ def test_merge_dirty_local_with_remote_update(sync_worker, local_test_db, remote
     assert local_room.terrain == "forest"
     # But still dirty because local had changes
     assert local_room.sync_status == "dirty"
+
+
+def test_delete_instance_logs_to_sync_deletes(local_test_db):
+    """Deleting a record via delete_instance should log to sync_deletes."""
+    entity = Entity.create(name="900", entity_type="Room")
+    room = Room.create(entity=entity, room_number=900, zone="TestArea")
+
+    room.delete_instance()
+
+    # Check sync_deletes has a record
+    deletes = list(SyncDelete.select())
+    assert len(deletes) == 1
+    assert deletes[0].table_name_field == "room"
+    assert '"room_number": 900' in deletes[0].natural_key
+    assert deletes[0].synced is False
+
+
+def test_push_deletes(sync_worker, local_test_db, remote_test_db):
+    """Local deletes should propagate to remote via push_deletes."""
+    # Set up a room on both sides
+    entity = Entity.create(name="1000", entity_type="Room")
+    room = Room.create(entity=entity, room_number=1000, zone="TestArea")
+    sync_worker.push()
+
+    # Verify it's on remote
+    remote_room = RemoteRoom.get_or_none(RemoteRoom.room_number == 1000)
+    assert remote_room is not None
+
+    # Delete locally (this logs to sync_deletes)
+    room.delete_instance()
+
+    # Push deletes
+    sync_worker.push_deletes()
+
+    # Verify remote room is gone
+    remote_room = RemoteRoom.get_or_none(RemoteRoom.room_number == 1000)
+    assert remote_room is None
+
+    # Verify sync_deletes is marked synced
+    delete_record = SyncDelete.get()
+    assert delete_record.synced is True
+
+
+def test_pull_deletes(sync_worker, local_test_db, remote_test_db):
+    """Remote deletes should propagate to local via pull_deletes."""
+    # Set up a room locally
+    entity = Entity.create(name="1100", entity_type="Room")
+    Room.create(entity=entity, room_number=1100, zone="TestArea")
+
+    # Simulate a remote delete log (as if Postgres trigger fired)
+    import json
+    RemoteSyncDelete.create(
+        table_name_field="room",
+        natural_key=json.dumps({"room_number": 1100}),
+        synced=False,
+    )
+
+    # Pull deletes
+    sync_worker.pull_deletes()
+
+    # Verify local room is gone
+    local_room = Room.get_or_none(Room.room_number == 1100)
+    assert local_room is None
+
+    # Verify remote sync_deletes is marked synced
+    remote_delete = RemoteSyncDelete.get()
+    assert remote_delete.synced is True
+
+
+def test_pull_deletes_for_exit(sync_worker, local_test_db, remote_test_db):
+    """Remote exit deletes should propagate to local."""
+    # Set up rooms and an exit locally
+    entity = Entity.create(name="1200", entity_type="Room")
+    room = Room.create(entity=entity, room_number=1200, zone="TestArea")
+    entity2 = Entity.create(name="1201", entity_type="Room")
+    room2 = Room.create(entity=entity2, room_number=1201, zone="TestArea")
+    RoomExit.create(from_room=room, direction="n", to_room=room2, to_room_number=1201)
+
+    # Simulate remote delete of the exit
+    import json
+    RemoteSyncDelete.create(
+        table_name_field="roomexit",
+        natural_key=json.dumps({"from_room_number": 1200, "direction": "n"}),
+        synced=False,
+    )
+
+    sync_worker.pull_deletes()
+
+    # Verify exit is gone locally
+    local_exit = RoomExit.get_or_none(
+        (RoomExit.from_room == room) & (RoomExit.direction == "n")
+    )
+    assert local_exit is None

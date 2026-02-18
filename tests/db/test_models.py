@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from mud_agent.db.models import (
+    ALL_MODELS,
     NPC,
     Entity,
     Observation,
@@ -26,9 +27,9 @@ def test_db():
         test_db_path = tmp_db.name
     db.init(test_db_path)
     db.connect()
-    db.create_tables([Entity, Room, RoomExit, NPC, Observation, Relation])
+    db.create_tables(ALL_MODELS)
     yield
-    db.drop_tables([Entity, Room, RoomExit, NPC, Observation, Relation])
+    db.drop_tables(ALL_MODELS)
     db.close()
     Path(test_db_path).unlink()
 

@@ -133,6 +133,19 @@ class RemoteRelation(RemoteBaseModel):
         table_name = "relation"
 
 
+class RemoteSyncDelete(Model):
+    """Remote mirror of SyncDelete — populated by Postgres triggers."""
+
+    table_name_field = CharField(max_length=50)
+    natural_key = TextField()
+    deleted_at = DateTimeField(default=datetime.now)
+    synced = BooleanField(default=False)
+
+    class Meta:
+        database = None
+        table_name = "sync_deletes"
+
+
 REMOTE_ALL_MODELS = [
     RemoteEntity,
     RemoteRoom,
@@ -140,4 +153,5 @@ REMOTE_ALL_MODELS = [
     RemoteNPC,
     RemoteObservation,
     RemoteRelation,
+    RemoteSyncDelete,
 ]

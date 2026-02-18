@@ -142,6 +142,14 @@ class MigrationManager:
             down_func=self._migration_012_down
         ))
 
+        # Migration 013: Create sync_deletes table for delete propagation
+        self.migrations.append(Migration(
+            version=13,
+            description="Create sync_deletes table for bidirectional delete sync",
+            up_func=self._migration_013_up,
+            down_func=self._migration_013_down
+        ))
+
     def _get_schema_version(self) -> int:
         """Get the current schema version from the database."""
         try:
@@ -560,6 +568,29 @@ class MigrationManager:
                     db.execute_sql(f"ALTER TABLE {table} DROP COLUMN remote_updated_at")
             except Exception as e:
                 print(f"⚠ Could not drop sync columns from {table}: {e}")
+
+    def _migration_013_up(self):
+        """Migration 013: Create sync_deletes table."""
+        with db.atomic():
+            db.execute_sql("""
+                CREATE TABLE IF NOT EXISTS sync_deletes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    table_name_field VARCHAR(50) NOT NULL,
+                    natural_key TEXT NOT NULL,
+                    deleted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    synced BOOLEAN NOT NULL DEFAULT 0
+                )
+            """)
+            db.execute_sql(
+                "CREATE INDEX IF NOT EXISTS idx_sync_deletes_synced ON sync_deletes (synced)"
+            )
+        print("✓ Created sync_deletes table")
+
+    def _migration_013_down(self):
+        """Migration 013 rollback: Drop sync_deletes table."""
+        with db.atomic():
+            db.execute_sql("DROP TABLE IF EXISTS sync_deletes")
+        print("✓ Dropped sync_deletes table")
 
     def _migration_002_down(self):
         """Migration 002 rollback: Remove composite unique constraint."""

@@ -5,6 +5,7 @@ Pull: Finds all remote records newer than last_pull_timestamp, merges locally.
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -19,6 +20,7 @@ from mud_agent.db.models import (
     Relation,
     Room,
     RoomExit,
+    SyncDelete,
     db as local_db,
 )
 from mud_agent.db.sync_models import (
@@ -29,6 +31,7 @@ from mud_agent.db.sync_models import (
     RemoteRelation,
     RemoteRoom,
     RemoteRoomExit,
+    RemoteSyncDelete,
     create_remote_db,
 )
 
@@ -46,6 +49,24 @@ LOCAL_TO_REMOTE = {
 
 # Push order: entities first, then rooms, then everything else
 PUSH_ORDER = [Entity, Room, RoomExit, NPC, Observation, Relation]
+
+# Mappings from table_name strings to model classes (for delete sync)
+TABLE_NAME_TO_REMOTE = {
+    "entity": RemoteEntity,
+    "room": RemoteRoom,
+    "roomexit": RemoteRoomExit,
+    "npc": RemoteNPC,
+    "observation": RemoteObservation,
+    "relation": RemoteRelation,
+}
+TABLE_NAME_TO_LOCAL = {
+    "entity": Entity,
+    "room": Room,
+    "roomexit": RoomExit,
+    "npc": NPC,
+    "observation": Observation,
+    "relation": Relation,
+}
 
 
 class SyncWorker:
@@ -104,11 +125,13 @@ class SyncWorker:
         """Push with a dedicated local DB connection for thread safety."""
         with local_db.connection_context():
             self.push()
+            self.push_deletes()
 
     def _pull_with_connection(self) -> None:
         """Pull with a dedicated local DB connection for thread safety."""
         with local_db.connection_context():
             self.pull()
+            self.pull_deletes()
 
     def push(self) -> None:
         """Push all dirty local records to the remote database."""
@@ -507,3 +530,209 @@ class SyncWorker:
 
         # Keep as dirty so next push cycle sends merged data
         local_record.save()
+
+    def push_deletes(self) -> None:
+        """Push local delete records to remote, then delete remote records."""
+        unsynced = list(SyncDelete.select().where(SyncDelete.synced == False))
+        if not unsynced:
+            return
+
+        self.logger.debug(f"Pushing {len(unsynced)} delete records to remote")
+
+        for record in unsynced:
+            try:
+                natural_key = json.loads(record.natural_key)
+                table_name = record.table_name_field
+                remote_model = TABLE_NAME_TO_REMOTE.get(table_name)
+                if not remote_model:
+                    self.logger.warning(f"Unknown table for delete sync: {table_name}")
+                    continue
+
+                # Find and delete the remote record
+                remote_record = self._find_remote_by_natural_key_dict(
+                    table_name, natural_key, remote_model
+                )
+                if remote_record:
+                    with self._remote_db.atomic():
+                        remote_record.delete_instance()
+                    self.logger.debug(
+                        f"Deleted remote {table_name} with key {natural_key}"
+                    )
+
+                # Mark as synced
+                SyncDelete.update(synced=True).where(
+                    SyncDelete.id == record.id
+                ).execute()
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to push delete {record.table_name_field}: {e}"
+                )
+
+    def pull_deletes(self) -> None:
+        """Pull delete records from remote and apply locally."""
+        query = RemoteSyncDelete.select().where(RemoteSyncDelete.synced == False)
+        remote_deletes = list(query)
+        if not remote_deletes:
+            return
+
+        self.logger.debug(f"Pulling {len(remote_deletes)} delete records from remote")
+
+        for record in remote_deletes:
+            try:
+                natural_key = json.loads(record.natural_key)
+                table_name = record.table_name_field
+                local_model = TABLE_NAME_TO_LOCAL.get(table_name)
+                if not local_model:
+                    self.logger.warning(f"Unknown table for delete sync: {table_name}")
+                    continue
+
+                # Find and delete the local record
+                local_record = self._find_local_by_natural_key_dict(
+                    table_name, natural_key, local_model
+                )
+                if local_record:
+                    # Use Model.delete_by_id to avoid re-logging the delete
+                    local_model.delete_by_id(local_record.id)
+                    self.logger.debug(
+                        f"Deleted local {table_name} with key {natural_key}"
+                    )
+
+                # Mark remote delete as synced
+                with self._remote_db.atomic():
+                    RemoteSyncDelete.update(synced=True).where(
+                        RemoteSyncDelete.id == record.id
+                    ).execute()
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to pull delete {record.table_name_field}: {e}"
+                )
+
+    def _find_remote_by_natural_key_dict(
+        self, table_name: str, natural_key: dict, remote_model
+    ):
+        """Find a remote record by its natural key dictionary."""
+        try:
+            if table_name == "entity":
+                return remote_model.get_or_none(
+                    (remote_model.name == natural_key["name"])
+                    & (remote_model.entity_type == natural_key["entity_type"])
+                )
+            elif table_name == "room":
+                return remote_model.get_or_none(
+                    remote_model.room_number == natural_key["room_number"]
+                )
+            elif table_name == "roomexit":
+                remote_from = RemoteRoom.get_or_none(
+                    RemoteRoom.room_number == natural_key["from_room_number"]
+                )
+                if remote_from:
+                    return remote_model.get_or_none(
+                        (remote_model.from_room == remote_from)
+                        & (remote_model.direction == natural_key["direction"])
+                    )
+                return None
+            elif table_name == "npc":
+                remote_entity = RemoteEntity.get_or_none(
+                    (RemoteEntity.name == natural_key["entity_name"])
+                    & (RemoteEntity.entity_type == natural_key["entity_type"])
+                )
+                if remote_entity:
+                    return remote_model.get_or_none(
+                        remote_model.entity == remote_entity
+                    )
+                return None
+            elif table_name == "observation":
+                remote_entity = RemoteEntity.get_or_none(
+                    (RemoteEntity.name == natural_key["entity_name"])
+                    & (RemoteEntity.entity_type == natural_key["entity_type"])
+                )
+                if remote_entity:
+                    return remote_model.get_or_none(
+                        (remote_model.entity == remote_entity)
+                        & (remote_model.observation_type == natural_key["observation_type"])
+                    )
+                return None
+            elif table_name == "relation":
+                remote_from = RemoteEntity.get_or_none(
+                    (RemoteEntity.name == natural_key["from_entity_name"])
+                    & (RemoteEntity.entity_type == natural_key["from_entity_type"])
+                )
+                remote_to = RemoteEntity.get_or_none(
+                    (RemoteEntity.name == natural_key["to_entity_name"])
+                    & (RemoteEntity.entity_type == natural_key["to_entity_type"])
+                )
+                if remote_from and remote_to:
+                    return remote_model.get_or_none(
+                        (remote_model.from_entity == remote_from)
+                        & (remote_model.to_entity == remote_to)
+                        & (remote_model.relation_type == natural_key["relation_type"])
+                    )
+                return None
+        except Exception:
+            return None
+
+    def _find_local_by_natural_key_dict(
+        self, table_name: str, natural_key: dict, local_model
+    ):
+        """Find a local record by its natural key dictionary."""
+        try:
+            if table_name == "entity":
+                return local_model.get_or_none(
+                    (local_model.name == natural_key["name"])
+                    & (local_model.entity_type == natural_key["entity_type"])
+                )
+            elif table_name == "room":
+                return local_model.get_or_none(
+                    local_model.room_number == natural_key["room_number"]
+                )
+            elif table_name == "roomexit":
+                local_from = Room.get_or_none(
+                    Room.room_number == natural_key["from_room_number"]
+                )
+                if local_from:
+                    return local_model.get_or_none(
+                        (local_model.from_room == local_from)
+                        & (local_model.direction == natural_key["direction"])
+                    )
+                return None
+            elif table_name == "npc":
+                local_entity = Entity.get_or_none(
+                    (Entity.name == natural_key["entity_name"])
+                    & (Entity.entity_type == natural_key["entity_type"])
+                )
+                if local_entity:
+                    return local_model.get_or_none(
+                        local_model.entity == local_entity
+                    )
+                return None
+            elif table_name == "observation":
+                local_entity = Entity.get_or_none(
+                    (Entity.name == natural_key["entity_name"])
+                    & (Entity.entity_type == natural_key["entity_type"])
+                )
+                if local_entity:
+                    return local_model.get_or_none(
+                        (local_model.entity == local_entity)
+                        & (local_model.observation_type == natural_key["observation_type"])
+                    )
+                return None
+            elif table_name == "relation":
+                local_from = Entity.get_or_none(
+                    (Entity.name == natural_key["from_entity_name"])
+                    & (Entity.entity_type == natural_key["from_entity_type"])
+                )
+                local_to = Entity.get_or_none(
+                    (Entity.name == natural_key["to_entity_name"])
+                    & (Entity.entity_type == natural_key["to_entity_type"])
+                )
+                if local_from and local_to:
+                    return local_model.get_or_none(
+                        (local_model.from_entity == local_from)
+                        & (local_model.to_entity == local_to)
+                        & (local_model.relation_type == natural_key["relation_type"])
+                    )
+                return None
+        except Exception:
+            return None

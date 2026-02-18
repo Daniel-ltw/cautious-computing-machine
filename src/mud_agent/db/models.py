@@ -54,6 +54,27 @@ class BaseModel(Model):
         self.sync_status = "dirty"
         return super().save(*args, **kwargs)
 
+    def get_natural_key(self) -> dict | None:
+        """Return the natural key dict for this record, used for delete sync.
+
+        Subclasses should override this if the default (id-based) is insufficient.
+        Returns None if no natural key can be determined.
+        """
+        return None
+
+    def delete_instance(self, *args, **kwargs):
+        """Override to log the delete for sync before actually deleting."""
+        natural_key = self.get_natural_key()
+        if natural_key is not None:
+            try:
+                SyncDelete.create(
+                    table_name_field=self._meta.table_name,
+                    natural_key=json.dumps(natural_key),
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log delete for sync: {e}")
+        return super().delete_instance(*args, **kwargs)
+
 
 class Entity(BaseModel):
     """Core entity table for both rooms and NPCs."""
@@ -76,6 +97,9 @@ class Entity(BaseModel):
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
+
+    def get_natural_key(self) -> dict | None:
+        return {"name": self.name, "entity_type": self.entity_type}
 
     def __str__(self):
         return f"{self.entity_type}: {self.name}"
@@ -106,6 +130,9 @@ class Room(BaseModel):
             # Zone-based queries
             (('zone', 'terrain'), False),
         )
+
+    def get_natural_key(self) -> dict | None:
+        return {"room_number": self.room_number}
 
     def __str__(self):
         return f"Room {self.room_number}: {self.entity.name}"
@@ -240,6 +267,12 @@ class RoomExit(BaseModel):
             (('to_room_number', 'direction'), False),
         )
 
+    def get_natural_key(self) -> dict | None:
+        try:
+            return {"from_room_number": self.from_room.room_number, "direction": self.direction}
+        except Exception:
+            return None
+
     def __str__(self):
         return f"Room {self.from_room.room_number} -> {self.direction} -> {self.to_room_number}"
 
@@ -370,6 +403,12 @@ class NPC(BaseModel):
         )
         constraints = [SQL('UNIQUE(entity_id, current_room_id)')]
 
+    def get_natural_key(self) -> dict | None:
+        try:
+            return {"entity_name": self.entity.name, "entity_type": self.entity.entity_type}
+        except Exception:
+            return None
+
     def __str__(self):
         room_info = f" in room {self.current_room.room_number}" if self.current_room else ""
         return f"NPC: {self.entity.name}{room_info}"
@@ -417,6 +456,17 @@ class Observation(BaseModel):
             (('observation_type', 'created_at'), False),
         )
 
+    def get_natural_key(self) -> dict | None:
+        try:
+            return {
+                "entity_name": self.entity.name,
+                "entity_type": self.entity.entity_type,
+                "observation_type": self.observation_type,
+                "observation_text": self.observation_text[:100],
+            }
+        except Exception:
+            return None
+
     def __str__(self):
         return f"Observation for {self.entity.name}: {self.observation_text[:50]}..."
 
@@ -441,12 +491,42 @@ class Relation(BaseModel):
             (('relation_type', 'created_at'), False),
         )
 
+    def get_natural_key(self) -> dict | None:
+        try:
+            return {
+                "from_entity_name": self.from_entity.name,
+                "from_entity_type": self.from_entity.entity_type,
+                "to_entity_name": self.to_entity.name,
+                "to_entity_type": self.to_entity.entity_type,
+                "relation_type": self.relation_type,
+            }
+        except Exception:
+            return None
+
     def __str__(self):
         return f"{self.from_entity.name} --{self.relation_type}--> {self.to_entity.name}"
 
 
+class SyncDelete(Model):
+    """Log of deleted records for bidirectional sync.
+
+    When a record is deleted locally (via delete_instance), a row is inserted here
+    so the SyncWorker can propagate the delete to the remote database.
+    The remote side uses Postgres triggers to populate its own sync_deletes table.
+    """
+
+    table_name_field = CharField(max_length=50)
+    natural_key = TextField()  # JSON string, e.g. {"room_number": 12345}
+    deleted_at = DateTimeField(default=datetime.now)
+    synced = BooleanField(default=False)
+
+    class Meta:
+        database = db
+        table_name = "sync_deletes"
+
+
 # Model registry for easy access
-ALL_MODELS = [Entity, Room, RoomExit, NPC, Observation, Relation]
+ALL_MODELS = [Entity, Room, RoomExit, NPC, Observation, Relation, SyncDelete]
 
 def get_db_stats() -> dict[str, int]:
     """Get statistics about the database."""

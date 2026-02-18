@@ -96,6 +96,8 @@ async def main() -> int:
             return 1
         finally:
             # Clean up
+            if agent.sync_worker:
+                await agent.sync_worker.stop()
             await agent.disconnect()
 
 
@@ -116,6 +118,10 @@ async def connect_and_initialize(agent, character_name, password, config):
         # Set up managers (including room_manager event subscriptions)
         await agent.setup_managers()
         logger.info("Agent managers initialized")
+
+        # Start background sync if configured
+        if agent.sync_worker and agent.config.database.url:
+            await agent.sync_worker.start(agent.config.database.url)
 
         # Connect to the MUD server
         connect_result = await agent.connect_to_mud()
