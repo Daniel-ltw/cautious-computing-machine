@@ -484,7 +484,7 @@ class CommandProcessor:
                 self.exploring = False
                 return
 
-            start_room = self.agent.knowledge_graph.get_room_by_number(start_room_num)
+            start_room = await self.agent.knowledge_graph.get_room_by_number(start_room_num)
             if not start_room or not start_room.zone:
                 command_log.write(
                     "[bold red]Error: Current area is unknown. Cannot start exploration.[/bold red]"
@@ -572,7 +572,7 @@ class CommandProcessor:
 
             # Explore exits of the current room
             await self.handle_update_room_command()
-            current_room_node = self.agent.knowledge_graph.get_room_by_number(self.state_manager.room_num)
+            current_room_node = await self.agent.knowledge_graph.get_room_by_number(self.state_manager.room_num)
             if not current_room_node:
                 continue
 
@@ -603,7 +603,7 @@ class CommandProcessor:
                     new_room_num = self.state_manager.room_num
                     new_room_data = self.agent.aardwolf_gmcp.get_room_info()
                     if new_room_data.get('zone') == target_area:
-                        new_room_node = self.agent.knowledge_graph.get_room_by_number(new_room_num)
+                        new_room_node = await self.agent.knowledge_graph.get_room_by_number(new_room_num)
                         if new_room_node and new_room_num not in visited_rooms:
                             queue.append(new_room_node)
                     else:

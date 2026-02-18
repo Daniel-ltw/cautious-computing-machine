@@ -10,6 +10,7 @@ from mud_agent.db.models import Room
 
 from .room_map_widget import RoomMapWidget
 from .state_listener import StateListener
+import asyncio
 
 
 class MapperContainer(StateListener, Container):
@@ -76,9 +77,9 @@ class MapperContainer(StateListener, Container):
         except Exception:
             pass
 
-        self._rebuild_widgets()
+        asyncio.create_task(self._rebuild_widgets())
 
-    def _rebuild_widgets(self):
+    async def _rebuild_widgets(self):
         """Clear and rebuild the grid of room widgets around the current room."""
         logger = logging.getLogger(__name__)
 
@@ -92,7 +93,10 @@ class MapperContainer(StateListener, Container):
         if not self.current_room_num:
             return
 
-        current_room = self._get_current_room_info()
+        # Yield to event loop before starting expensive work
+        await asyncio.sleep(0)
+
+        current_room = await self._get_current_room_info()
         if not current_room:
             logger.warning(f"Current room {self.current_room_num} not found in rooms data.")
             return
@@ -103,14 +107,17 @@ class MapperContainer(StateListener, Container):
         # Add the current room at the center
         rooms_to_display[(self.CENTER_ROW, self.CENTER_COL, self.CENTER_Z)] = current_room
 
-        # Call the adjacents method
+        # Call the adjacents method with reduced depth to prevent freezing
         center_pos = (self.CENTER_ROW, self.CENTER_COL, self.CENTER_Z)
-        self._update_adjacent_by_depth(
+        await self._update_adjacent_by_depth(
             rooms_to_display,
             current_room,
             center_pos,
-            6,
+            3,
         )
+
+        # Yield after expensive recursive traversal
+        await asyncio.sleep(0)
 
         # Ensure cardinal neighbors render on Level 0 even when targets are unresolved
         try:
@@ -155,10 +162,15 @@ class MapperContainer(StateListener, Container):
 
     def watch_current_room_num(self, old, new):
         """Watch for changes in current room number."""
-        self._rebuild_widgets()
+        asyncio.create_task(self._rebuild_widgets())
 
-    def _update_adjacent_by_depth(self, rooms_to_display, current_room, current_pos, depth = 1):
+    async def _update_adjacent_by_depth(self, rooms_to_display, current_room, current_pos, depth = 1):
         current_r, current_c, current_z = current_pos
+
+        # Batch fetch all adjacent rooms concurrently
+        fetch_tasks = []
+        exit_info = []  # Store (direction, room_num, new_r, new_c, new_z) tuples
+
         for direction, room_num in current_room.get("exits", {}).items():
             if direction not in self._get_mapper_coords_positions():
                 continue
@@ -181,33 +193,54 @@ class MapperContainer(StateListener, Container):
                 continue
             if new_c >= self.GRID_COLS or new_c < 0 or new_r >= self.GRID_ROWS or new_r < 0 or new_z not in self.LEVELS:
                 continue
-            try:
-                if isinstance(dest_room_num, int) and dest_room_num > 0:
-                    new_room = Room.get(room_number=dest_room_num).to_info()
-                else:
-                    raise Room.DoesNotExist
-            except Room.DoesNotExist:
-                # Placeholder room when destination is unknown
+
+            # Store exit info for processing after fetch
+            exit_info.append((direction, dest_room_num, new_r, new_c, new_z))
+
+            # Create fetch task if room number is valid
+            if isinstance(dest_room_num, int) and dest_room_num > 0:
+                fetch_tasks.append(self.app.agent.knowledge_graph.get_room_info(dest_room_num))
+            else:
+                fetch_tasks.append(None)  # Placeholder for invalid room
+
+        # Fetch all rooms concurrently
+        if fetch_tasks:
+            fetched_rooms = await asyncio.gather(*[task if task else asyncio.sleep(0, result=None) for task in fetch_tasks], return_exceptions=True)
+        else:
+            fetched_rooms = []
+
+        # Process fetched rooms
+        for idx, (direction, dest_room_num, new_r, new_c, new_z) in enumerate(exit_info):
+            new_room = fetched_rooms[idx] if idx < len(fetched_rooms) else None
+
+            # Handle exceptions or missing rooms
+            if isinstance(new_room, Exception) or not new_room:
                 new_room = {
                     "num": dest_room_num if dest_room_num else -1,
                     "exits": {},
                     "placeholder": True,
                 }
+
             rooms_to_display[(new_r, new_c, new_z)] = new_room
+
+            # Recursively fetch deeper levels
             if depth > 1:
                 current_depth = depth - 1
-                self._update_adjacent_by_depth(
+                await self._update_adjacent_by_depth(
                     rooms_to_display,
                     new_room,
                     (new_r, new_c, new_z),
                     current_depth,
                 )
+                # Yield to event loop after each recursive call
+                await asyncio.sleep(0)
 
-    def _get_current_room_info(self) -> dict[str, Any] | None:
+    async def _get_current_room_info(self) -> dict[str, Any] | None:
         room = None
         try:
-            room = Room.get(room_number=self.current_room_num).to_info()
-        except Room.DoesNotExist:
+            if hasattr(self.app, 'agent') and hasattr(self.app.agent, 'knowledge_graph'):
+                room = await self.app.agent.knowledge_graph.get_room_info(self.current_room_num)
+        except Exception:
             room = None
         if room:
             return room
