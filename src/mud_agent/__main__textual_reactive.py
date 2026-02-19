@@ -60,7 +60,9 @@ async def main() -> int:
         # Get character name from .env (required)
         character_name = env_vars.get("MUD_USERNAME", "")
         if not character_name:
-            logger.error("MUD_USERNAME not found in .env file. Please set it and restart.")
+            logger.error(
+                "MUD_USERNAME not found in .env file. Please set it and restart."
+            )
             return 1
         else:
             logger.info(f"Using username from .env file: {character_name}")
@@ -68,7 +70,9 @@ async def main() -> int:
         # Get password from .env (required)
         password = env_vars.get("MUD_PASSWORD", "")
         if not password:
-            logger.error("MUD_PASSWORD not found in .env file. Please set it and restart.")
+            logger.error(
+                "MUD_PASSWORD not found in .env file. Please set it and restart."
+            )
             return 1
         else:
             logger.info("Using password from .env file")
@@ -117,13 +121,6 @@ async def main() -> int:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-            # 3.5. Stop buff manager
-            if agent.buff_manager.active:
-                try:
-                    await agent.buff_manager.stop()
-                except Exception as e:
-                    logger.error(f"Error stopping buff manager: {e}")
-
             # 4. Stop the sync worker (cancels _sync_loop task, closes remote DB)
             if agent.sync_worker:
                 try:
@@ -163,8 +160,6 @@ async def main() -> int:
                     pass
 
             logger.info("Shutdown complete.")
-
-
 
         return 0
 

@@ -12,6 +12,7 @@ from smolagents import LiteLLMModel
 from ..client import MudClient
 from ..client.tools import MUDClientTool
 from ..config import Config
+from ..db.sync_worker import SyncWorker
 from ..mcp import MCPManager
 from ..mcp.game_knowledge_graph import GameKnowledgeGraph
 from ..protocols.aardwolf import AardwolfGMCPManager
@@ -22,10 +23,8 @@ from .automation_manager import AutomationManager
 from .combat_manager import CombatManager
 from .decision_engine import DecisionEngine
 from .npc_manager import NPCManager
-from .buff_manager import BuffManager
 from .quest_manager import QuestManager
 from .room_manager import RoomManager
-from ..db.sync_worker import SyncWorker
 
 
 class MUDAgent:
@@ -52,7 +51,7 @@ class MUDAgent:
             port=config.mud.port,
             debug_mode=False,
             keep_alive_enabled=True,
-            keep_alive_interval=10.0  # Send keep-alive every 10 seconds
+            keep_alive_interval=10.0,  # Send keep-alive every 10 seconds
         )
 
         # Create MUD client tool
@@ -63,7 +62,7 @@ class MUDAgent:
             self.client,
             kg_update_interval=self.config.gmcp.kg_update_interval,
             max_kg_failures=self.config.gmcp.max_kg_failures,
-            event_manager=self.events  # Pass the event manager
+            event_manager=self.events,  # Pass the event manager
         )
         self.aardwolf_gmcp.agent = self
 
@@ -96,7 +95,6 @@ class MUDAgent:
         self.npc_manager = NPCManager(self.events)
         self.decision_engine = DecisionEngine(self.events, self.client)
         self.quest_manager = QuestManager(self)
-        self.buff_manager = BuffManager(self)
 
         # For backward compatibility, alias state_manager as status_manager
         self.status_manager = self.state_manager
@@ -122,7 +120,6 @@ class MUDAgent:
         """Set up all the managers."""
         await self.room_manager.setup()
         await self.quest_manager.setup()
-        await self.buff_manager.setup()
         self.logger.info("Room manager setup complete")
 
     @property
@@ -130,6 +127,7 @@ class MUDAgent:
         """Lazy load the command processor."""
         if self._command_processor is None:
             from .command_processor import CommandProcessor
+
             self._command_processor = CommandProcessor(self, self.room_manager)
         return self._command_processor
 
@@ -366,8 +364,6 @@ class MUDAgent:
             bool: True if navigation was successful, False otherwise
         """
         return await self.npc_manager.find_and_navigate_to_npc(npc_name, use_speedwalk)
-
-
 
     async def get_knowledge_graph_summary(self) -> str:
         """Get a formatted summary of the knowledge graph.
