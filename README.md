@@ -1,316 +1,142 @@
 # MUD Agent
 
-An intelligent agent for playing MUD games with MCP (Multi-Context Protocol) integration.
+An intelligent agent for playing [Aardwolf MUD](http://www.aardwolf.com/) with automated exploration, mapping, and combat. Features a Textual-based terminal UI with live map, vitals, and command interface.
 
 ## Features
 
-- Connects to MUD servers using telnet protocols
-- Supports multiple telnet protocols:
-  - GMCP (Generic MUD Communication Protocol)
-  - MSDP (MUD Server Data Protocol)
-  - MCCP (MUD Client Compression Protocol)
-  - ANSI color codes
-- Integrates with Sequential Thinking MCP for decision making
-- Uses Knowledge Graph Memory MCP for storing game knowledge
-- Provides automation capabilities with context-aware exploration
-- Asynchronous I/O for efficient communication
-- Modular, component-based architecture with each class in its own file
-- Event-driven design with reactive state management
-- Two UI options:
-  - Terminal-based UI with live status display
-  - Textual-based UI with reactive widgets for status, map, and command input/output
+- Connects to Aardwolf MUD via telnet with GMCP, MSDP, MCCP, and ANSI support
+- Textual-based terminal UI with split panes for map, vitals, and command I/O
+- Automated exploration with breadth-first room discovery
+- Local SQLite knowledge graph with optional Supabase background sync
+- Room mapping, NPC tracking, quest management, and pathfinding
+- Event-driven architecture with reactive state management
 
-## Requirements
+## Prerequisites
 
-- Python 3.8+
-- Dependencies listed in `requirements.txt`
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
 
-## Installation
+## Quick Start
 
-1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd mud_agent
+# Clone the repository
+git clone https://github.com/Daniel-ltw/cautious-computing-machine.git
+cd cautious-computing-machine
+
+# Set up your environment
+cp .env.example .env
+# Edit .env with your MUD credentials (see Configuration below)
+
+# Install dependencies and run
+uv sync
+uv run mud-agent
 ```
 
-2. Create and activate a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+### Alternative: pip
 
-3. Install the package in development mode:
 ```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -e .
+mud-agent
 ```
 
-This will install the package and its dependencies, making it available for import in your Python environment.
-
-## Usage
-
-1. (Optional) Set up your credentials in a `.env` file:
-   - Copy the `.env.example` file to `.env`
-   - Fill in your MUD username and password
-   ```
-   MUD_USERNAME=your_username
-   MUD_PASSWORD=your_password
-   ```
-
-2. Run the agent:
-
-For the terminal-based UI:
-```bash
-python -m src.mud_agent
-```
-
-For the Textual-based UI:
-```bash
-./run_textual_reactive.py
-```
-
-3. If credentials are not found in the `.env` file, you'll be prompted to enter your character name and password.
-
-4. Enter commands to interact with the MUD server:
-   - Regular MUD commands: `look`, `north`, `examine blackboard`, etc.
-   - Special commands:
-     - `auto [context]`: Enable automation mode with optional context
-     - `quit`: Exit the program
-
-5. When automation is enabled:
-   - The agent will explore the game world automatically
-   - Press Ctrl+C to disable automation and return to manual mode
-
-## Textual UI
-
-The Textual UI provides a more modern, interactive interface with the following features:
-
-- Split-pane layout with dedicated areas for:
-  - Status display (showing character stats, room info, and quest status)
-  - Mini-map display (showing the current room's map)
-  - Command input and output
-
-To use the Textual UI:
+### Alternative: run as module
 
 ```bash
-./run_textual_reactive.py
+uv run python -m mud_agent
 ```
 
-The Textual UI uses reactive attributes to automatically update the display when the game state changes, providing a more responsive and visually appealing experience.
+## Configuration
+
+Copy `.env.example` to `.env` and fill in your settings:
+
+```bash
+# Required: MUD server credentials
+MUD_USERNAME=your_character_name
+MUD_PASSWORD=your_password
+
+# Optional: MUD server (defaults to aardmud.org:4000)
+# MUD_HOST=aardmud.org
+# MUD_PORT=4000
+
+# Optional: Supabase sync for sharing map data across machines
+# DATABASE_URL=postgresql://user:password@host:port/dbname
+# SYNC_ENABLED=true
+# SYNC_INTERVAL=30
+
+# Optional: auto-cast commands on tick (comma-separated)
+# AUTOCAST_COMMANDS=nimble,hide,sneak
+
+# Optional: recall sequence
+# RECALL="wear amu;enter"
+```
+
+If credentials are not in `.env`, you'll be prompted on startup.
+
+## In-Game Commands
+
+Standard MUD commands work as expected (`look`, `north`, `kill rat`, etc.). Additional agent commands:
+
+| Command | Description |
+|---------|-------------|
+| `auto [context]` | Enable automated exploration with optional context |
+| `Ctrl+C` | Disable automation, return to manual mode |
+| `quit` | Exit the program |
+
+## Database and Sync
+
+The agent stores all discovered rooms, exits, NPCs, and observations in a **local SQLite database** (`knowledge_graph.db`). This works out of the box with no configuration.
+
+### Optional: Supabase Sync
+
+To share map data across machines, set `DATABASE_URL`, `SYNC_ENABLED=true`, and `SYNC_INTERVAL` in your `.env`. The agent runs a background sync worker that pushes local changes to Supabase and pulls remote changes (e.g., from a friend's session).
+
+Delete sync is bidirectional: local deletes propagate to remote, and remote deletes (via Supabase dashboard or triggers) propagate back. See `docs/supabase_delete_triggers.sql` for the Postgres trigger setup.
+
+## Development
+
+```bash
+# Install with dev and test dependencies
+uv sync --extra dev --extra test
+
+# Run tests
+uv run pytest
+
+# Run a specific test file
+uv run pytest tests/db/test_models.py -v
+
+# Lint and format
+uv run ruff check .
+uv run ruff format .
+```
 
 ## Project Structure
 
 ```
-mud_agent/
-├── src/
-│   └── mud_agent/
-│       ├── __init__.py
-│       ├── __main__.py
-│       ├── __main__textual_reactive.py
-│       ├── agent/
-│       │   ├── __init__.py
-│       │   ├── mud_agent.py
-│       │   ├── refactored_mud_agent.py
-│       │   ├── automation_manager.py
-│       │   ├── combat_manager.py
-│       │   ├── decision_engine.py
-│       │   ├── knowledge_graph_manager.py
-│       │   ├── npc_manager.py
-│       │   ├── quest_manager.py
-│       │   ├── room_manager.py
-│       │   └── components/
-│       │       ├── __init__.py
-│       │       ├── base_component.py
-│       │       ├── connection.py
-│       │       └── command.py
-│       ├── client/
-│       │   ├── __init__.py
-│       │   ├── mud_client.py
-│       │   └── tools/
-│       │       ├── __init__.py
-│       │       └── mud_client_tool.py
-│       ├── config/
-│       │   ├── __init__.py
-│       │   └── config.py
-│       ├── mcp/
-│       │   ├── __init__.py
-│       │   ├── manager.py
-│       │   └── tools/
-│       │       ├── __init__.py
-│       │       ├── create_entities_wrapper.py
-│       │       ├── create_relations_wrapper.py
-│       │       └── sequential_thinking_wrapper.py
-│       ├── protocols/
-│       │   ├── __init__.py
-│       │   ├── telnet_bytes.py
-│       │   ├── aardwolf_gmcp.py
-│       │   ├── msdp_handler.py
-│       │   ├── mccp_handler.py
-│       │   ├── color_handler.py
-│       │   └── aardwolf/
-│       │       ├── __init__.py
-│       │       ├── gmcp_manager.py
-│       │       ├── character_data.py
-│       │       ├── room_data.py
-│       │       ├── map_data.py
-│       │       ├── quest_data.py
-│       │       └── utils.py
-│       ├── state/
-│       │   ├── __init__.py
-│       │   ├── state_manager.py
-│       │   └── components/
-│       │       ├── __init__.py
-│       │       ├── base_component.py
-│       │       ├── character_state.py
-│       │       ├── room_state.py
-│       │       ├── quest_state.py
-│       │       ├── event_handlers.py
-│       │       └── observers.py
-│       └── utils/
-│           ├── __init__.py
-│           ├── logging.py
-│           ├── env_loader.py
-│           ├── tick_manager.py
-│           ├── live_status_display.py
-│           ├── map_storage.py
-│           ├── textual_integration.py
-│           ├── event_emitter.py
-│           └── widgets/
-│               ├── __init__.py
-│               ├── base.py
-│               ├── state_listener.py
-│               ├── vitals_widgets.py
-│               ├── status_widgets.py
-│               └── map_widgets.py
-├── tests/
-│   ├── test_config.py
-│   ├── test_logging.py
-│   ├── test_mcp_manager.py
-│   ├── test_mcp_tools.py
-│   ├── test_mud_agent.py
-│   ├── test_mud_client.py
-│   ├── test_mud_client_tool.py
-│   └── test_protocols.py
-├── pytest.ini
-├── requirements.txt
-└── README.md
+src/mud_agent/
+  __main__.py                    # Entry point (python -m mud_agent)
+  __main__textual_reactive.py    # Textual UI app launcher
+  agent/                         # Core agent logic
+    mud_agent.py                 #   Main agent orchestrator
+    automation_manager.py        #   Automated exploration
+    combat_manager.py            #   Combat handling
+    knowledge_graph_manager.py   #   Knowledge graph queries
+    quest_manager.py             #   Quest tracking
+    room_manager.py              #   Room processing
+  client/                        # MUD client connection
+  config/                        # Configuration loading
+  db/                            # Database layer
+    models.py                    #   Peewee models (Entity, Room, RoomExit, NPC, etc.)
+    sync_models.py               #   Remote mirror models for Supabase sync
+    sync_worker.py               #   Background push/pull sync worker
+    migrations.py                #   SQLite schema migrations
+  mcp/                           # MCP tool integrations
+  protocols/                     # Telnet protocol handlers (GMCP, MSDP, MCCP)
+  state/                         # Reactive state management
+  utils/                         # UI widgets, logging, helpers
+tests/                           # Test suite
 ```
-
-## Architecture
-
-The MUD Agent uses a component-based architecture to organize functionality into specialized components that work together. This approach provides several benefits:
-
-- **Modularity**: Each component is responsible for a specific aspect of functionality
-- **Maintainability**: Smaller, focused components are easier to understand and maintain
-- **Testability**: Components can be tested in isolation
-- **Extensibility**: New components can be added without modifying existing code
-
-Key architectural components include:
-
-### StateManager
-
-The StateManager is the central state repository that uses composition to delegate functionality to specialized components:
-
-- **CharacterStateComponent**: Manages character-related state (stats, vitals, etc.)
-- **RoomStateComponent**: Manages room-related state (room info, exits, map, etc.)
-
-### AardwolfGMCPManager
-
-The AardwolfGMCPManager handles GMCP data processing using specialized processors:
-
-- **CharacterDataProcessor**: Processes character-related GMCP data
-- **RoomDataProcessor**: Processes room-related GMCP data
-- **MapDataProcessor**: Processes map-related GMCP data
-- **QuestDataProcessor**: Processes quest-related GMCP data
-
-### MUDAgent
-
-The MUDAgent coordinates between various specialized managers and components:
-
-- **ConnectionComponent**: Manages the connection to the MUD server
-- **CommandComponent**: Processes commands sent to the MUD server
-
-For more details, see the [Architecture Documentation](docs/architecture.md).
-
-## Development
-
-- Use `ruff` for code formatting and linting
-- Write tests using `pytest`
-- Follow the component-based architecture pattern
-- Keep files under 300 lines for better maintainability
-
-## Testing
-
-To run the tests, you need to make sure the `src` directory is in your Python path. Here are several ways to do this:
-
-### Option 1: Set the PYTHONPATH environment variable
-
-```bash
-# On Unix/Linux/macOS
-export PYTHONPATH=$PYTHONPATH:$(pwd)/src
-
-# On Windows
-set PYTHONPATH=%PYTHONPATH%;%CD%\src
-```
-
-Then run the tests:
-```bash
-pytest
-```
-
-### Option 2: Use the run_tests.py script
-
-This script automatically adds the src directory to the Python path:
-```bash
-python run_tests.py
-```
-
-### Option 3: Install the package in development mode
-
-```bash
-pip install -e .
-```
-
-Then run the tests:
-```bash
-pytest
-```
-
-### Running tests with coverage
-
-```bash
-# With PYTHONPATH set
-pytest --cov=mud_agent
-
-# Using the run_tests.py script
-python run_tests.py --cov=mud_agent
-```
-
-### Running specific tests
-
-```bash
-# Run a specific test file
-pytest tests/test_config.py
-
-# Run a specific test class
-pytest tests/test_config.py::TestModelConfig
-
-# Run a specific test method
-pytest tests/test_config.py::TestModelConfig::test_default_values
-```
-
-### Troubleshooting
-
-If you encounter issues with the tests:
-
-1. Make sure the `src` directory is in your Python path
-2. Check that all dependencies are installed
-3. Try running a specific test file to isolate the issue
-4. Look for import errors or missing dependencies
-5. If tests seem to hang, it might be due to asyncio event loop issues. Try running with:
-   ```bash
-   pytest --asyncio-mode=auto
-   ```
-6. For tests involving AsyncMock objects, make sure to await any coroutine methods
 
 ## License
 

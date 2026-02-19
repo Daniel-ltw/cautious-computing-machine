@@ -165,5 +165,10 @@ async def connect_and_initialize(agent, character_name, password, config):
         return False
 
 
-if __name__ == "__main__":
+def main_sync() -> None:
+    """Synchronous entry point for console_scripts."""
     sys.exit(asyncio.run(main()))
+
+
+if __name__ == "__main__":
+    main_sync()

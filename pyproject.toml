@@ -16,6 +16,9 @@ dependencies = [
     "psycopg2-binary"
 ]
 
+[project.scripts]
+mud-agent = "mud_agent.__main__textual_reactive:main_sync"
+
 [project.optional-dependencies]
 dev = [
     "ruff==0.3.4",
