@@ -88,8 +88,8 @@ class BuffManager:
     def _on_buff_expired(self, buff_name: str) -> None:
         """Handle a detected buff expiry.
 
-        Triggers a debounced recast. Multiple expiries within the debounce
-        window produce only one recast command.
+        If in combat, defers recast until combat ends. Otherwise triggers
+        a debounced recast.
 
         Args:
             buff_name: Name/description of the expired buff (for logging)
@@ -99,11 +99,32 @@ class BuffManager:
 
         self.logger.debug(f"Buff expired: {buff_name}")
 
+        # Defer during combat
+        if self.agent.combat_manager.in_combat:
+            self._recast_pending = True
+            self.logger.debug("In combat — deferring recast")
+            return
+
         # Cancel existing debounce task and start a new one
         if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
 
         self._debounce_task = asyncio.create_task(self._debounced_recast())
+
+    def _on_combat_state_changed(self) -> None:
+        """Handle combat state change.
+
+        If combat just ended and there's a pending recast, trigger it.
+        """
+        if self.agent.combat_manager.in_combat:
+            return
+
+        if self._recast_pending:
+            self._recast_pending = False
+            self.logger.info("Combat ended — triggering deferred recast")
+            if self._debounce_task and not self._debounce_task.done():
+                self._debounce_task.cancel()
+            self._debounce_task = asyncio.create_task(self._debounced_recast())
 
     async def _debounced_recast(self) -> None:
         """Wait for the debounce window, then recast."""
