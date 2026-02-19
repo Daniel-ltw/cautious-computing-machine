@@ -62,6 +62,7 @@ class BuffManager:
         self._recast_pending: bool = False
         self._debounce_task: asyncio.Task | None = None
         self._fallback_task: asyncio.Task | None = None
+        self._was_in_combat: bool = False
 
     async def setup(self) -> None:
         """Subscribe to client data events.
@@ -79,6 +80,7 @@ class BuffManager:
         """Enable buff management and start the fallback timer."""
         self.active = True
         self._recast_pending = False
+        self._was_in_combat = False
         self._fallback_task = asyncio.create_task(self._fallback_timer_loop())
         self.logger.info("BuffManager started")
 
@@ -86,6 +88,7 @@ class BuffManager:
         """Disable buff management and cancel all tasks."""
         self.active = False
         self._recast_pending = False
+        self._was_in_combat = False
 
         if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
@@ -104,7 +107,7 @@ class BuffManager:
     def _handle_incoming_data(self, text: str) -> None:
         """Handle incoming server data.
 
-        Checks text for buff expiry patterns and triggers recast if found.
+        Checks for combat state transitions and buff expiry patterns.
 
         Args:
             text: Raw text from the MUD server
@@ -112,6 +115,13 @@ class BuffManager:
         if not self.active:
             return
 
+        # Check for combat state transition
+        currently_in_combat = self.agent.combat_manager.in_combat
+        if self._was_in_combat and not currently_in_combat:
+            self._on_combat_state_changed()
+        self._was_in_combat = currently_in_combat
+
+        # Check for buff expiry
         if self._check_buff_expiry(text):
             buff_desc = text.strip()[:60]
             self._on_buff_expired(buff_desc)

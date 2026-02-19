@@ -249,3 +249,32 @@ class TestBuffManagerLifecycle:
         agent = MagicMock(spec=[])  # No client attribute
         bm = BuffManager(agent)
         await bm.setup()  # Should not raise
+
+
+class TestBuffManagerCombatTransition:
+    """Test combat state transition detection via data events."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.agent = MagicMock()
+        self.agent.send_command = AsyncMock()
+        self.agent.client = MagicMock()
+        self.agent.client.events = MagicMock()
+        self.agent.combat_manager = MagicMock()
+        self.agent.combat_manager.in_combat = True
+        self.buff_manager = BuffManager(self.agent)
+        self.buff_manager.active = True
+
+    @pytest.mark.asyncio
+    async def test_combat_end_detected_via_data_event(self):
+        """Test that combat ending is detected from data events."""
+        # Buff expires during combat
+        self.buff_manager._handle_incoming_data("Your sanctuary fades.")
+        assert self.buff_manager._recast_pending is True
+
+        # Combat ends — next data event should detect the transition
+        self.agent.combat_manager.in_combat = False
+        self.buff_manager._handle_incoming_data("The rat is dead!")
+        await self.buff_manager._debounce_task
+        self.agent.send_command.assert_called_once_with("spellup learned")
+        assert self.buff_manager._recast_pending is False
