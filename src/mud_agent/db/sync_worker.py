@@ -7,6 +7,7 @@ Pull: Finds all remote records newer than last_pull_timestamp, merges locally.
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -155,6 +156,8 @@ class SyncWorker:
                     self.logger.error(
                         f"Failed to push {local_model.__name__} id={record.id}: {e}"
                     )
+                # Yield the SQLite write lock briefly so the main thread can write
+                time.sleep(0.01)
 
     def _push_record(self, record, local_model, remote_model) -> None:
         """Push a single local record to the remote database."""
@@ -368,6 +371,8 @@ class SyncWorker:
                     self.logger.error(
                         f"Failed to pull {remote_model.__name__} id={remote_record.id}: {e}"
                     )
+                # Yield the SQLite write lock briefly so the main thread can write
+                time.sleep(0.01)
 
         self._last_pull_at = datetime.now(timezone.utc)
 

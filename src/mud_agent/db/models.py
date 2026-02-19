@@ -33,7 +33,7 @@ DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 logger.info(f"Using SQLite database at {DB_PATH}")
 db = SqliteDatabase(str(DB_PATH), pragmas={
     'journal_mode': 'wal',
-    'busy_timeout': 5000,  # Wait up to 5s for locks instead of failing immediately
+    'busy_timeout': 30000,  # Wait up to 30s for locks (SyncWorker may hold writes)
 })
 
 
