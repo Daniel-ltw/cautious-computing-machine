@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from peewee import DoesNotExist, IntegrityError, fn
+from peewee import DoesNotExist, IntegrityError, OperationalError, fn
 
 from ..db.migrate_db import DatabaseMigrator
 from ..db.models import (
@@ -42,13 +42,23 @@ class GameKnowledgeGraph:
         self._initialized = False
 
     async def _run_db(self, func, *args, **kwargs):
-        """Run a database function directly on the event loop.
+        """Run a database function with retry on lock errors.
 
-        SQLite operations are fast enough to run synchronously. Using a
-        single connection avoids 'database is locked' errors that occur
-        when multiple threads try to write concurrently.
+        SQLite operations are fast enough to run synchronously. Retries
+        with backoff if the database is locked by the SyncWorker thread.
         """
-        return func(*args, **kwargs)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                return func(*args, **kwargs)
+            except OperationalError as e:
+                if "locked" in str(e) and attempt < max_retries - 1:
+                    self.logger.warning(
+                        f"DB locked in {func.__name__} (attempt {attempt + 1}/{max_retries}), retrying..."
+                    )
+                    await asyncio.sleep(0.2 * (attempt + 1))
+                    continue
+                raise
 
     async def initialize(self) -> None:
         """Initialize the database connection and run migrations."""
@@ -127,11 +137,8 @@ class GameKnowledgeGraph:
     def _add_entity_sync(self, entity_data: dict[str, Any]) -> Entity | None:
         """Synchronous implementation of add_entity."""
         if not self._initialized:
-            # We can't await initialize() here because we are in a sync wrapper running in a thread.
-            # However, logic calling this should ensure initialization or we assume init is done.
-            # For robustness, we check the flag.
-             self.logger.error("Cannot add entity: Knowledge graph not initialized.")
-             return None
+            self.logger.error("Cannot add entity: Knowledge graph not initialized.")
+            return None
 
         entity_type = entity_data.get("entityType")
         if not entity_type:
