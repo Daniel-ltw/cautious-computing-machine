@@ -5,6 +5,7 @@ Detects buff expiry from server text and recasts via Aardwolf's native
 """
 
 import asyncio
+import contextlib
 import logging
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,74 @@ class BuffManager:
         self._recast_pending: bool = False
         self._debounce_task: asyncio.Task | None = None
         self._fallback_task: asyncio.Task | None = None
+
+    async def setup(self) -> None:
+        """Subscribe to client data events.
+
+        Called during agent setup_managers(). Subscribes to the data stream
+        but does not start active buff management — call start() for that.
+        """
+        if hasattr(self.agent, "client") and hasattr(self.agent.client, "events"):
+            self.agent.client.events.on("data", self._handle_incoming_data)
+            self.logger.info("BuffManager subscribed to client data events")
+        else:
+            self.logger.warning("Agent client or events not available for subscription")
+
+    async def start(self) -> None:
+        """Enable buff management and start the fallback timer."""
+        self.active = True
+        self._recast_pending = False
+        self._fallback_task = asyncio.create_task(self._fallback_timer_loop())
+        self.logger.info("BuffManager started")
+
+    async def stop(self) -> None:
+        """Disable buff management and cancel all tasks."""
+        self.active = False
+        self._recast_pending = False
+
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._debounce_task
+        self._debounce_task = None
+
+        if self._fallback_task and not self._fallback_task.done():
+            self._fallback_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._fallback_task
+        self._fallback_task = None
+
+        self.logger.info("BuffManager stopped")
+
+    def _handle_incoming_data(self, text: str) -> None:
+        """Handle incoming server data.
+
+        Checks text for buff expiry patterns and triggers recast if found.
+
+        Args:
+            text: Raw text from the MUD server
+        """
+        if not self.active:
+            return
+
+        if self._check_buff_expiry(text):
+            buff_desc = text.strip()[:60]
+            self._on_buff_expired(buff_desc)
+
+    async def _fallback_timer_loop(self) -> None:
+        """Periodic fallback recast loop.
+
+        Runs 'spellup learned' every FALLBACK_INTERVAL seconds to catch
+        missed expiry events (death, dispel, login, unknown patterns).
+        """
+        try:
+            while self.active:
+                await asyncio.sleep(FALLBACK_INTERVAL)
+                if self.active and not self.agent.combat_manager.in_combat:
+                    self.logger.debug("Fallback timer: sending spellup")
+                    await self._request_recast()
+        except asyncio.CancelledError:
+            self.logger.debug("Fallback timer cancelled")
 
     def _check_buff_expiry(self, text: str) -> bool:
         """Check if text contains a buff expiry message.

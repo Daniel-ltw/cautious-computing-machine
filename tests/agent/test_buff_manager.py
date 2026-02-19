@@ -160,3 +160,83 @@ class TestBuffManagerCombatAwareness:
         # But no recast should fire
         assert self.buff_manager._debounce_task is None
         self.agent.send_command.assert_not_called()
+
+
+class TestBuffManagerEventHandling:
+    """Test data event handling and incoming text processing."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.agent = MagicMock()
+        self.agent.send_command = AsyncMock()
+        self.agent.client = MagicMock()
+        self.agent.client.events = MagicMock()
+        self.agent.combat_manager = MagicMock()
+        self.agent.combat_manager.in_combat = False
+        self.buff_manager = BuffManager(self.agent)
+        self.buff_manager.active = True
+
+    @pytest.mark.asyncio
+    async def test_handle_incoming_data_detects_expiry(self):
+        """Test that incoming data with expiry text triggers recast."""
+        self.buff_manager._handle_incoming_data("Your sanctuary fades.")
+        assert self.buff_manager._debounce_task is not None
+        await self.buff_manager._debounce_task
+        self.agent.send_command.assert_called_once_with("spellup learned")
+
+    @pytest.mark.asyncio
+    async def test_handle_incoming_data_ignores_normal_text(self):
+        """Test that normal text doesn't trigger recast."""
+        self.buff_manager._handle_incoming_data("A rat scurries by.")
+        assert self.buff_manager._debounce_task is None
+        self.agent.send_command.assert_not_called()
+
+    def test_handle_incoming_data_when_inactive(self):
+        """Test that inactive manager ignores all text."""
+        self.buff_manager.active = False
+        self.buff_manager._handle_incoming_data("Your sanctuary fades.")
+        assert self.buff_manager._debounce_task is None
+
+
+class TestBuffManagerLifecycle:
+    """Test start/stop lifecycle."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.agent = MagicMock()
+        self.agent.send_command = AsyncMock()
+        self.agent.client = MagicMock()
+        self.agent.client.events = MagicMock()
+        self.agent.combat_manager = MagicMock()
+        self.agent.combat_manager.in_combat = False
+        self.buff_manager = BuffManager(self.agent)
+
+    @pytest.mark.asyncio
+    async def test_setup_subscribes_to_events(self):
+        """Test that setup subscribes to client data events."""
+        await self.buff_manager.setup()
+        self.agent.client.events.on.assert_called_once_with(
+            "data", self.buff_manager._handle_incoming_data
+        )
+
+    @pytest.mark.asyncio
+    async def test_start_activates_and_starts_fallback(self):
+        """Test that start activates manager and starts fallback timer."""
+        await self.buff_manager.start()
+        assert self.buff_manager.active is True
+        assert self.buff_manager._fallback_task is not None
+        await self.buff_manager.stop()
+
+    @pytest.mark.asyncio
+    async def test_stop_deactivates_and_cancels_tasks(self):
+        """Test that stop deactivates and cleans up all tasks."""
+        await self.buff_manager.start()
+        await self.buff_manager.stop()
+        assert self.buff_manager.active is False
+        assert self.buff_manager._recast_pending is False
+
+    @pytest.mark.asyncio
+    async def test_stop_when_not_active(self):
+        """Test that stop is safe to call when not active."""
+        await self.buff_manager.stop()
+        assert self.buff_manager.active is False
