@@ -78,6 +78,7 @@ class SyncWorker:
         self._task: Optional[asyncio.Task] = None
         self._remote_db = None
         self._last_pull_at: Optional[datetime] = None
+        self._stopping = False
         self.logger = logging.getLogger(__name__)
 
     async def start(self, database_url: str) -> None:
@@ -97,6 +98,7 @@ class SyncWorker:
 
     async def stop(self) -> None:
         """Stop the sync loop gracefully."""
+        self._stopping = True
         if self._task and not self._task.done():
             self._task.cancel()
             try:
@@ -150,6 +152,8 @@ class SyncWorker:
             )
 
             for record in dirty_records:
+                if self._stopping:
+                    return
                 try:
                     self._push_record(record, local_model, remote_model)
                 except Exception as e:
@@ -365,6 +369,8 @@ class SyncWorker:
             )
 
             for remote_record in remote_records:
+                if self._stopping:
+                    return
                 try:
                     self._pull_record(remote_record, local_model, remote_model)
                 except Exception as e:
@@ -587,6 +593,8 @@ class SyncWorker:
         self.logger.debug(f"Pushing {len(unsynced)} delete records to remote")
 
         for record in unsynced:
+            if self._stopping:
+                return
             try:
                 natural_key = json.loads(record.natural_key)
                 table_name = record.table_name_field
@@ -626,6 +634,8 @@ class SyncWorker:
         self.logger.debug(f"Pulling {len(remote_deletes)} delete records from remote")
 
         for record in remote_deletes:
+            if self._stopping:
+                return
             try:
                 natural_key = json.loads(record.natural_key)
                 table_name = record.table_name_field

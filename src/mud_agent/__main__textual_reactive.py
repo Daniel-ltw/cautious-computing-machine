@@ -83,22 +83,79 @@ async def main() -> int:
                 connect_and_initialize(agent, character_name, password, config)
             )
 
-            # Run the Textual app
+            # Run the Textual app (blocks until user quits)
             await app.run_async()
-
-            # Wait for the initialization to complete
-            receive_task = await init_task
-            if receive_task:
-                await receive_task
 
         except Exception as e:
             logger.error(f"An error occurred: {e}", exc_info=True)
             return 1
         finally:
-            # Clean up
+            # Clean up everything so the process can exit
+            logger.info("Shutting down...")
+
+            # 1. Disconnect from MUD server first — this sets client.connected=False
+            #    which causes receive_data() loop to exit naturally
+            try:
+                await agent.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting: {e}")
+
+            # 2. Cancel the init task (may still be connecting/waiting for banner)
+            if not init_task.done():
+                init_task.cancel()
+                try:
+                    await init_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+            # 3. Cancel the receive_data task if it was started
+            receive_task = getattr(agent.mud_tool.client, "receive_task", None)
+            if receive_task and not receive_task.done():
+                receive_task.cancel()
+                try:
+                    await receive_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+            # 4. Stop the sync worker (cancels _sync_loop task, closes remote DB)
             if agent.sync_worker:
-                await agent.sync_worker.stop()
-            await agent.disconnect()
+                try:
+                    await agent.sync_worker.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping sync worker: {e}")
+
+            # 5. Stop tick manager thread
+            try:
+                agent.tick_manager.stop()
+            except Exception as e:
+                logger.error(f"Error stopping tick manager: {e}")
+
+            # 6. Stop state manager
+            if agent.use_threaded_updates:
+                try:
+                    agent.state_manager.stop_threads()
+                except Exception as e:
+                    logger.error(f"Error stopping state manager: {e}")
+
+            # 7. Cancel the periodic GMCP update task
+            gmcp_task = getattr(agent, "gmcp_update_task", None)
+            if gmcp_task and not gmcp_task.done():
+                gmcp_task.cancel()
+                try:
+                    await gmcp_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+            # 8. Cancel keep-alive task on the client
+            keep_alive = getattr(agent.client, "keep_alive_task", None)
+            if keep_alive and not keep_alive.done():
+                keep_alive.cancel()
+                try:
+                    await keep_alive
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+            logger.info("Shutdown complete.")
 
 
 
