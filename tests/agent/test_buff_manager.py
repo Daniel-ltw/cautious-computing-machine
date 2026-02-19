@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Tests for BuffManager."""
 
-import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from mud_agent.agent.buff_manager import BuffManager
 
@@ -81,8 +80,8 @@ class TestBuffManagerRecast:
         self.buff_manager._on_buff_expired("sanctuary")
         # Debounce task should be created
         assert self.buff_manager._debounce_task is not None
-        # Wait for debounce to complete
-        await asyncio.sleep(2.0)
+        # Await the debounce task directly instead of sleeping
+        await self.buff_manager._debounce_task
         self.agent.send_command.assert_called_once_with("spellup learned")
 
     @pytest.mark.asyncio
@@ -91,8 +90,8 @@ class TestBuffManagerRecast:
         self.buff_manager._on_buff_expired("sanctuary")
         self.buff_manager._on_buff_expired("shield")
         self.buff_manager._on_buff_expired("armor")
-        # Wait for debounce
-        await asyncio.sleep(2.0)
+        # Await the final debounce task
+        await self.buff_manager._debounce_task
         # Should only send one spellup command
         self.agent.send_command.assert_called_once_with("spellup learned")
 
@@ -101,5 +100,6 @@ class TestBuffManagerRecast:
         """Test that no recast happens when buff manager is inactive."""
         self.buff_manager.active = False
         self.buff_manager._on_buff_expired("sanctuary")
-        await asyncio.sleep(2.0)
+        # No debounce task should be created since _on_buff_expired returns early
+        assert self.buff_manager._debounce_task is None
         self.agent.send_command.assert_not_called()

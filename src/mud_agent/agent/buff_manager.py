@@ -83,7 +83,7 @@ class BuffManager:
             await self.agent.send_command(SPELLUP_COMMAND)
             self.logger.info("Sent spellup recast command")
         except Exception as e:
-            self.logger.error(f"Error sending spellup command: {e}")
+            self.logger.error(f"Error sending spellup command: {e}", exc_info=True)
 
     def _on_buff_expired(self, buff_name: str) -> None:
         """Handle a detected buff expiry.
