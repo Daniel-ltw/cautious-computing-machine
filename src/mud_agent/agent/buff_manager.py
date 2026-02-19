@@ -6,7 +6,6 @@ Detects buff expiry from server text and recasts via Aardwolf's native
 
 import asyncio
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +59,8 @@ class BuffManager:
 
         self.active: bool = False
         self._recast_pending: bool = False
-        self._debounce_task: Optional[asyncio.Task] = None
-        self._fallback_task: Optional[asyncio.Task] = None
+        self._debounce_task: asyncio.Task | None = None
+        self._fallback_task: asyncio.Task | None = None
 
     def _check_buff_expiry(self, text: str) -> bool:
         """Check if text contains a buff expiry message.

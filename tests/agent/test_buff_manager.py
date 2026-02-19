@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Tests for BuffManager."""
 
-import asyncio
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from mud_agent.agent.buff_manager import BuffManager
@@ -38,7 +36,9 @@ class TestBuffManagerPatternDetection:
 
     def test_detects_generic_wears_off(self):
         """Test detection of generic wear-off message."""
-        assert self.buff_manager._check_buff_expiry("Your armor spell wears off.") is True
+        assert (
+            self.buff_manager._check_buff_expiry("Your armor spell wears off.") is True
+        )
 
     def test_ignores_normal_text(self):
         """Test that normal game text is not detected as buff expiry."""
