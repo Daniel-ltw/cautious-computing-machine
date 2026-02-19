@@ -805,6 +805,9 @@ class CommandProcessor:
         )
         command_log.write("[bold white]/atk <mob>[/bold white] - Attack mob")
         command_log.write(
+            "[bold white]/ac[/bold white] - Toggle automatic buff management (spellup on expiry)"
+        )
+        command_log.write(
             "[bold white]/auto <context>|off[/bold white] - Enable/disable automation with context"
         )
         command_log.write(

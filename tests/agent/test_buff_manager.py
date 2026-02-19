@@ -88,7 +88,9 @@ class TestBuffManagerRecast:
         self.buff_manager._on_buff_expired("sanctuary")
         self.buff_manager._on_buff_expired("shield")
         self.buff_manager._on_buff_expired("armor")
-        await self.buff_manager._debounce_task
+        # Capture final task reference to ensure we await the active (not cancelled) task
+        task = self.buff_manager._debounce_task
+        await task
         self.agent.send_command.assert_called_once_with("spellup learned")
 
     @pytest.mark.asyncio
