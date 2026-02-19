@@ -20,6 +20,7 @@ from ..state import StateManager
 from ..utils.event_manager import EventManager
 from ..utils.tick_manager import TickManager
 from .automation_manager import AutomationManager
+from .buff_manager import BuffManager
 from .combat_manager import CombatManager
 from .decision_engine import DecisionEngine
 from .npc_manager import NPCManager
@@ -95,6 +96,7 @@ class MUDAgent:
         self.npc_manager = NPCManager(self.events)
         self.decision_engine = DecisionEngine(self.events, self.client)
         self.quest_manager = QuestManager(self)
+        self.buff_manager = BuffManager(self)
 
         # For backward compatibility, alias state_manager as status_manager
         self.status_manager = self.state_manager
@@ -120,6 +122,7 @@ class MUDAgent:
         """Set up all the managers."""
         await self.room_manager.setup()
         await self.quest_manager.setup()
+        await self.buff_manager.setup()
         self.logger.info("Room manager setup complete")
 
     @property

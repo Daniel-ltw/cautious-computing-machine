@@ -36,8 +36,6 @@ class CommandProcessor:
         self.logger = logger
         self.exploring = False
         self.exploration_task = None
-        self.auto_spellup = False
-        self.auto_spellup_task = None
 
     async def submit_command(self, command: str) -> None:
         """Submit a command for processing.
@@ -99,23 +97,17 @@ class CommandProcessor:
                 await self.handle_mobhunt(area)
 
             elif command == "/ac":
-                self.auto_spellup = not self.auto_spellup
                 command_log = self.app.query_one("#command-log", CommandLog)
-                if self.auto_spellup:
+                if self.agent.buff_manager.active:
+                    await self.agent.buff_manager.stop()
                     command_log.write(
-                        "[bold cyan]Autocast: [/bold cyan][bold red]On[/bold red]"
+                        "[bold cyan]Buff Manager: [/bold cyan][bold red]Off[/bold red]"
                     )
-                    if not self.auto_spellup_task or self.auto_spellup_task.done():
-                        self.auto_spellup_task = asyncio.create_task(
-                            self.handle_autocast()
-                        )
                 else:
+                    await self.agent.buff_manager.start()
                     command_log.write(
-                        "[bold cyan]Autocast: [/bold cyan][bold red]Off[/bold red]"
+                        "[bold cyan]Buff Manager: [/bold cyan][bold green]On[/bold green]"
                     )
-                    if self.auto_spellup_task and not self.auto_spellup_task.done():
-                        self.auto_spellup_task.cancel()
-                    self.auto_spellup_task = None
 
             elif command.startswith("/rf "):
                 room_name = command[4:].strip()
@@ -356,19 +348,6 @@ class CommandProcessor:
 
         return ";".join(final_commands)
 
-    async def handle_autocast(self):
-        while True:
-            if not self.auto_spellup:
-                return
-
-            # Use configured autocast commands or fallback to default
-            skills_spells = ["nimble", "hide", "sneak", "cast under"]
-            if hasattr(self.agent, "config") and hasattr(self.agent.config, "agent"):
-                skills_spells = self.agent.config.agent.autocast_commands
-
-            for cmd in skills_spells:
-                await self.agent.send_command(cmd)
-            await asyncio.sleep(random.uniform(15.0, 60.0))
 
     async def find_direction_and_walk_to_room(self, room_name: str) -> None:
         """Find a path to the specified room using the knowledge graph and pre-fill the run command.
