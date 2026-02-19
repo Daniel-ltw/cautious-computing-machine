@@ -117,6 +117,13 @@ async def main() -> int:
                 except (asyncio.CancelledError, Exception):
                     pass
 
+            # 3.5. Stop buff manager
+            if agent.buff_manager.active:
+                try:
+                    await agent.buff_manager.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping buff manager: {e}")
+
             # 4. Stop the sync worker (cancels _sync_loop task, closes remote DB)
             if agent.sync_worker:
                 try:
