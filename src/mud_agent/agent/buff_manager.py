@@ -76,3 +76,40 @@ class BuffManager:
 
         text_lower = text.lower()
         return any(pattern in text_lower for pattern in BUFF_EXPIRY_PATTERNS)
+
+    async def _request_recast(self) -> None:
+        """Send the spellup command to recast all buffs."""
+        try:
+            await self.agent.send_command(SPELLUP_COMMAND)
+            self.logger.info("Sent spellup recast command")
+        except Exception as e:
+            self.logger.error(f"Error sending spellup command: {e}")
+
+    def _on_buff_expired(self, buff_name: str) -> None:
+        """Handle a detected buff expiry.
+
+        Triggers a debounced recast. Multiple expiries within the debounce
+        window produce only one recast command.
+
+        Args:
+            buff_name: Name/description of the expired buff (for logging)
+        """
+        if not self.active:
+            return
+
+        self.logger.debug(f"Buff expired: {buff_name}")
+
+        # Cancel existing debounce task and start a new one
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
+
+        self._debounce_task = asyncio.create_task(self._debounced_recast())
+
+    async def _debounced_recast(self) -> None:
+        """Wait for the debounce window, then recast."""
+        try:
+            await asyncio.sleep(DEBOUNCE_SECONDS)
+            if self.active:
+                await self._request_recast()
+        except asyncio.CancelledError:
+            pass  # Debounce was reset by another expiry
