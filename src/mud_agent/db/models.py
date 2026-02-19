@@ -405,7 +405,12 @@ class NPC(BaseModel):
 
     def get_natural_key(self) -> dict | None:
         try:
-            return {"entity_name": self.entity.name, "entity_type": self.entity.entity_type}
+            room_number = self.current_room.room_number if self.current_room_id else None
+            return {
+                "entity_name": self.entity.name,
+                "entity_type": self.entity.entity_type,
+                "room_number": room_number,
+            }
         except Exception:
             return None
 

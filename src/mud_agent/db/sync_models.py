@@ -103,9 +103,8 @@ class RemoteRoomExit(RemoteBaseModel):
 
 class RemoteNPC(RemoteBaseModel):
     """Remote mirror of NPC."""
-    entity = ForeignKeyField(RemoteEntity, backref="npc_data", unique=True)
-    level = IntegerField(null=True)
-    is_aggressive = BooleanField(default=False)
+    entity = ForeignKeyField(RemoteEntity, backref="npc_data")
+    npc_type = CharField(max_length=50, null=True)
     current_room = ForeignKeyField(RemoteRoom, backref="npcs", null=True)
 
     class Meta:
@@ -115,9 +114,8 @@ class RemoteNPC(RemoteBaseModel):
 class RemoteObservation(RemoteBaseModel):
     """Remote mirror of Observation."""
     entity = ForeignKeyField(RemoteEntity, backref="observations")
-    observation_type = CharField(max_length=50)
-    content = TextField()
-    source = CharField(max_length=100, null=True)
+    observation_text = TextField()
+    observation_type = CharField(max_length=50, default="general")
 
     class Meta:
         table_name = "observation"
@@ -127,7 +125,8 @@ class RemoteRelation(RemoteBaseModel):
     """Remote mirror of Relation."""
     from_entity = ForeignKeyField(RemoteEntity, backref="relations_from")
     to_entity = ForeignKeyField(RemoteEntity, backref="relations_to")
-    relation_type = CharField(max_length=50)
+    relation_type = CharField(max_length=100)
+    metadata = TextField(null=True)
 
     class Meta:
         table_name = "relation"

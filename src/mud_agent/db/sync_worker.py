@@ -293,8 +293,50 @@ class SyncWorker:
                     & (RemoteEntity.entity_type == entity.entity_type)
                 )
                 if remote_entity:
+                    # Match by entity + current_room (compound unique)
+                    if record.current_room_id:
+                        local_room = record.current_room
+                        remote_room = RemoteRoom.get_or_none(
+                            RemoteRoom.room_number == local_room.room_number
+                        )
+                        return remote_model.get_or_none(
+                            (remote_model.entity == remote_entity)
+                            & (remote_model.current_room == remote_room)
+                        )
+                    else:
+                        return remote_model.get_or_none(
+                            (remote_model.entity == remote_entity)
+                            & (remote_model.current_room.is_null())
+                        )
+                return None
+            elif local_model == Observation:
+                entity = record.entity
+                remote_entity = RemoteEntity.get_or_none(
+                    (RemoteEntity.name == entity.name)
+                    & (RemoteEntity.entity_type == entity.entity_type)
+                )
+                if remote_entity:
                     return remote_model.get_or_none(
-                        remote_model.entity == remote_entity
+                        (remote_model.entity == remote_entity)
+                        & (remote_model.observation_type == record.observation_type)
+                    )
+                return None
+            elif local_model == Relation:
+                from_entity = record.from_entity
+                to_entity = record.to_entity
+                remote_from = RemoteEntity.get_or_none(
+                    (RemoteEntity.name == from_entity.name)
+                    & (RemoteEntity.entity_type == from_entity.entity_type)
+                )
+                remote_to = RemoteEntity.get_or_none(
+                    (RemoteEntity.name == to_entity.name)
+                    & (RemoteEntity.entity_type == to_entity.entity_type)
+                )
+                if remote_from and remote_to:
+                    return remote_model.get_or_none(
+                        (remote_model.from_entity == remote_from)
+                        & (remote_model.to_entity == remote_to)
+                        & (remote_model.relation_type == record.relation_type)
                     )
                 return None
             else:
