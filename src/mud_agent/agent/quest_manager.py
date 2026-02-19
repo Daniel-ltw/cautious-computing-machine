@@ -8,9 +8,9 @@ quest acceptance, tracking, and completion.
 import asyncio
 import logging
 import re
-import time
 import subprocess
 import sys
+import time
 
 # Constants for quest management
 DEFAULT_QUEST_COOLDOWN = 120  # Default 2 minutes cooldown in seconds

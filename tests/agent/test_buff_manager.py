@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Tests for BuffManager."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -79,9 +78,7 @@ class TestBuffManagerRecast:
     async def test_on_buff_expired_triggers_debounced_recast(self):
         """Test that buff expiry triggers a debounced recast."""
         self.buff_manager._on_buff_expired("sanctuary")
-        # Debounce task should be created
         assert self.buff_manager._debounce_task is not None
-        # Await the debounce task directly instead of sleeping
         await self.buff_manager._debounce_task
         self.agent.send_command.assert_called_once_with("spellup learned")
 
@@ -91,9 +88,7 @@ class TestBuffManagerRecast:
         self.buff_manager._on_buff_expired("sanctuary")
         self.buff_manager._on_buff_expired("shield")
         self.buff_manager._on_buff_expired("armor")
-        # Await the final debounce task
         await self.buff_manager._debounce_task
-        # Should only send one spellup command
         self.agent.send_command.assert_called_once_with("spellup learned")
 
     @pytest.mark.asyncio
@@ -101,7 +96,6 @@ class TestBuffManagerRecast:
         """Test that no recast happens when buff manager is inactive."""
         self.buff_manager.active = False
         self.buff_manager._on_buff_expired("sanctuary")
-        # No debounce task should be created since _on_buff_expired returns early
         assert self.buff_manager._debounce_task is None
         self.agent.send_command.assert_not_called()
 
@@ -124,10 +118,9 @@ class TestBuffManagerCombatAwareness:
     async def test_expiry_during_combat_sets_pending(self):
         """Test that expiry during combat defers recast."""
         self.buff_manager._on_buff_expired("sanctuary")
-        await asyncio.sleep(2.0)
-        # Should NOT have sent spellup during combat
+        # No debounce task created during combat
+        assert self.buff_manager._debounce_task is None
         self.agent.send_command.assert_not_called()
-        # Should have set pending flag
         assert self.buff_manager._recast_pending is True
 
     @pytest.mark.asyncio
@@ -135,7 +128,6 @@ class TestBuffManagerCombatAwareness:
         """Test that pending recast fires when combat ends."""
         # Expire during combat
         self.buff_manager._on_buff_expired("sanctuary")
-        await asyncio.sleep(2.0)
         assert self.buff_manager._recast_pending is True
 
         # Combat ends
@@ -150,4 +142,21 @@ class TestBuffManagerCombatAwareness:
         """Test that combat end without pending recast does nothing."""
         self.agent.combat_manager.in_combat = False
         self.buff_manager._on_combat_state_changed()
+        self.agent.send_command.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_combat_ended_inactive_clears_pending_no_recast(self):
+        """Test that combat end on inactive manager clears pending but doesn't recast."""
+        # Expire during combat
+        self.buff_manager._on_buff_expired("sanctuary")
+        assert self.buff_manager._recast_pending is True
+
+        # Deactivate manager, then combat ends
+        self.buff_manager.active = False
+        self.agent.combat_manager.in_combat = False
+        self.buff_manager._on_combat_state_changed()
+        # Pending should be cleared
+        assert self.buff_manager._recast_pending is False
+        # But no recast should fire
+        assert self.buff_manager._debounce_task is None
         self.agent.send_command.assert_not_called()

@@ -121,6 +121,8 @@ class BuffManager:
 
         if self._recast_pending:
             self._recast_pending = False
+            if not self.active:
+                return
             self.logger.info("Combat ended — triggering deferred recast")
             if self._debounce_task and not self._debounce_task.done():
                 self._debounce_task.cancel()
