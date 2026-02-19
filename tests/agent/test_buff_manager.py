@@ -234,9 +234,18 @@ class TestBuffManagerLifecycle:
         await self.buff_manager.stop()
         assert self.buff_manager.active is False
         assert self.buff_manager._recast_pending is False
+        assert self.buff_manager._fallback_task is None
+        assert self.buff_manager._debounce_task is None
 
     @pytest.mark.asyncio
     async def test_stop_when_not_active(self):
         """Test that stop is safe to call when not active."""
         await self.buff_manager.stop()
         assert self.buff_manager.active is False
+
+    @pytest.mark.asyncio
+    async def test_setup_without_client_events(self):
+        """Test that setup handles missing client events gracefully."""
+        agent = MagicMock(spec=[])  # No client attribute
+        bm = BuffManager(agent)
+        await bm.setup()  # Should not raise
