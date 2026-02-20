@@ -394,7 +394,7 @@ class MUDClientTool(Tool):
 
         return ""
 
-    def _extract_text_entries(selfself, debug_entries: list) -> str:
+    def _extract_text_entries(self, debug_entries: list) -> str:
         """Extract TEXT entries from debug capture.
 
         Args:

@@ -107,6 +107,9 @@ class MUDAgent:
         # Flag to indicate whether to use threaded updates
         self.use_threaded_updates = False
 
+        # Guard to prevent double setup_managers() calls
+        self._managers_setup = False
+
         # Initialize command processor to None for lazy loading
         self._command_processor = None
 
@@ -119,11 +122,19 @@ class MUDAgent:
         self.logger.debug("MUD agent initialized")
 
     async def setup_managers(self):
-        """Set up all the managers."""
+        """Set up all the managers.
+
+        Idempotent — safe to call multiple times. Event subscriptions are
+        only registered on the first call.
+        """
+        if self._managers_setup:
+            self.logger.debug("setup_managers() already called, skipping")
+            return
         await self.room_manager.setup()
         await self.quest_manager.setup()
         await self.buff_manager.setup()
-        self.logger.info("Room manager setup complete")
+        self._managers_setup = True
+        self.logger.info("Agent managers setup complete")
 
     @property
     def command_processor(self):
