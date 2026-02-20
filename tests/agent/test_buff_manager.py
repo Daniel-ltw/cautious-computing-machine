@@ -41,6 +41,15 @@ class TestBuffManagerPatternDetection:
             self.buff_manager._check_buff_expiry("Your armor spell wears off.") is True
         )
 
+    def test_detects_lost_concentration(self):
+        """Test detection of lost concentration during casting."""
+        assert (
+            self.buff_manager._check_buff_expiry(
+                "You lost your concentration while trying to cast sanctuary."
+            )
+            is True
+        )
+
     def test_ignores_normal_text(self):
         """Test that normal game text is not detected as buff expiry."""
         assert self.buff_manager._check_buff_expiry("A rat attacks you!") is False
@@ -70,9 +79,19 @@ class TestBuffManagerRecast:
 
     @pytest.mark.asyncio
     async def test_request_recast_sends_spellup(self):
-        """Test that _request_recast sends spellup learned."""
+        """Test that _request_recast sends spellup learned and extra buffs."""
         await self.buff_manager._request_recast()
-        self.agent.send_command.assert_called_once_with("spellup learned")
+        expected_calls = [
+            (("spellup learned",),),
+            (("cast 'detect hidden'",),),
+            (("cast 'detect invis'",),),
+            (("cast 'detect magic'",),),
+        ]
+        assert self.agent.send_command.call_count == 4
+        self.agent.send_command.assert_any_call("spellup learned")
+        self.agent.send_command.assert_any_call("cast 'detect hidden'")
+        self.agent.send_command.assert_any_call("cast 'detect invis'")
+        self.agent.send_command.assert_any_call("cast 'detect magic'")
 
     @pytest.mark.asyncio
     async def test_on_buff_expired_triggers_debounced_recast(self):
@@ -80,7 +99,7 @@ class TestBuffManagerRecast:
         self.buff_manager._on_buff_expired("sanctuary")
         assert self.buff_manager._debounce_task is not None
         await self.buff_manager._debounce_task
-        self.agent.send_command.assert_called_once_with("spellup learned")
+        self.agent.send_command.assert_any_call("spellup learned")
 
     @pytest.mark.asyncio
     async def test_multiple_expiries_produce_single_recast(self):
@@ -91,7 +110,7 @@ class TestBuffManagerRecast:
         # Capture final task reference to ensure we await the active (not cancelled) task
         task = self.buff_manager._debounce_task
         await task
-        self.agent.send_command.assert_called_once_with("spellup learned")
+        self.agent.send_command.assert_any_call("spellup learned")
 
     @pytest.mark.asyncio
     async def test_no_recast_when_inactive(self):
@@ -136,7 +155,7 @@ class TestBuffManagerCombatAwareness:
         self.agent.combat_manager.in_combat = False
         self.buff_manager._on_combat_state_changed()
         await self.buff_manager._debounce_task
-        self.agent.send_command.assert_called_once_with("spellup learned")
+        self.agent.send_command.assert_any_call("spellup learned")
         assert self.buff_manager._recast_pending is False
 
     @pytest.mark.asyncio
@@ -184,7 +203,7 @@ class TestBuffManagerEventHandling:
         self.buff_manager._handle_incoming_data("Your sanctuary fades.")
         assert self.buff_manager._debounce_task is not None
         await self.buff_manager._debounce_task
-        self.agent.send_command.assert_called_once_with("spellup learned")
+        self.agent.send_command.assert_any_call("spellup learned")
 
     @pytest.mark.asyncio
     async def test_handle_incoming_data_ignores_normal_text(self):
@@ -227,6 +246,17 @@ class TestBuffManagerLifecycle:
         await self.buff_manager.start()
         assert self.buff_manager.active is True
         assert self.buff_manager._fallback_task is not None
+        # Should send immediate spellup on start
+        self.agent.send_command.assert_any_call("spellup learned")
+        await self.buff_manager.stop()
+
+    @pytest.mark.asyncio
+    async def test_start_during_combat_defers_spellup(self):
+        """Test that start during combat does not send immediate spellup."""
+        self.agent.combat_manager.in_combat = True
+        await self.buff_manager.start()
+        assert self.buff_manager.active is True
+        self.agent.send_command.assert_not_called()
         await self.buff_manager.stop()
 
     @pytest.mark.asyncio
@@ -278,5 +308,5 @@ class TestBuffManagerCombatTransition:
         self.agent.combat_manager.in_combat = False
         self.buff_manager._handle_incoming_data("The rat is dead!")
         await self.buff_manager._debounce_task
-        self.agent.send_command.assert_called_once_with("spellup learned")
+        self.agent.send_command.assert_any_call("spellup learned")
         assert self.buff_manager._recast_pending is False

@@ -151,20 +151,30 @@ class SyncWorker:
                 f"Pushing {len(dirty_records)} dirty {local_model.__name__} records"
             )
 
+            pushed_ids = []
             for record in dirty_records:
                 if self._stopping:
-                    return
+                    break
                 try:
                     self._push_record(record, local_model, remote_model)
+                    pushed_ids.append(record.id)
                 except Exception as e:
                     self.logger.error(
                         f"Failed to push {local_model.__name__} id={record.id}: {e}"
                     )
-                # Yield the SQLite write lock briefly so the main thread can write
-                time.sleep(0.01)
+
+            # Batch-mark all successfully pushed records as synced in one write
+            if pushed_ids:
+                local_model.update(
+                    sync_status="synced",
+                    remote_updated_at=datetime.now(timezone.utc),
+                ).where(local_model.id.in_(pushed_ids)).execute()
 
     def _push_record(self, record, local_model, remote_model) -> None:
-        """Push a single local record to the remote database."""
+        """Push a single local record to the remote database.
+
+        Returns without marking local as synced — the caller batches that.
+        """
         data = {}
         for field in local_model._meta.sorted_fields:
             if field.name == "id":
@@ -191,12 +201,6 @@ class SyncWorker:
                 existing.save()
             else:
                 remote_model.create(**data)
-
-        # Mark local as synced (bypass the save() override that sets dirty)
-        local_model.update(
-            sync_status="synced",
-            remote_updated_at=datetime.now(timezone.utc),
-        ).where(local_model.id == record.id).execute()
 
     def _resolve_fk_for_push(self, record, local_model, data: dict) -> dict:
         """Resolve local FK IDs to remote FK IDs for push."""
@@ -592,9 +596,10 @@ class SyncWorker:
 
         self.logger.debug(f"Pushing {len(unsynced)} delete records to remote")
 
+        synced_ids = []
         for record in unsynced:
             if self._stopping:
-                return
+                break
             try:
                 natural_key = json.loads(record.natural_key)
                 table_name = record.table_name_field
@@ -614,15 +619,18 @@ class SyncWorker:
                         f"Deleted remote {table_name} with key {natural_key}"
                     )
 
-                # Mark as synced
-                SyncDelete.update(synced=True).where(
-                    SyncDelete.id == record.id
-                ).execute()
+                synced_ids.append(record.id)
 
             except Exception as e:
                 self.logger.error(
                     f"Failed to push delete {record.table_name_field}: {e}"
                 )
+
+        # Batch-mark all successfully pushed deletes as synced
+        if synced_ids:
+            SyncDelete.update(synced=True).where(
+                SyncDelete.id.in_(synced_ids)
+            ).execute()
 
     def pull_deletes(self) -> None:
         """Pull delete records from remote and apply locally."""

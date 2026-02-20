@@ -24,6 +24,8 @@ BUFF_EXPIRY_PATTERNS = [
     "you slow down.",
     "your protection fades.",
     "you become visible.",
+    # Cast interruption (hit during spellup)
+    "you lost your concentration",
     # Generic catch-alls
     "has worn off.",
     "wears off.",
@@ -39,6 +41,13 @@ FALLBACK_INTERVAL = 120.0
 
 # The command to recast all buffs
 SPELLUP_COMMAND = "spellup learned"
+
+# Additional buff commands not covered by spellup
+EXTRA_BUFF_COMMANDS = [
+    "cast 'detect hidden'",
+    "cast 'detect invis'",
+    "cast 'detect magic'",
+]
 
 
 class BuffManager:
@@ -83,6 +92,10 @@ class BuffManager:
         self._was_in_combat = False
         self._fallback_task = asyncio.create_task(self._fallback_timer_loop())
         self.logger.info("BuffManager started")
+
+        # Immediately send spellup on activation (unless in combat)
+        if not self.agent.combat_manager.in_combat:
+            await self._request_recast()
 
     async def stop(self) -> None:
         """Disable buff management and cancel all tasks."""
@@ -157,12 +170,14 @@ class BuffManager:
         return any(pattern in text_lower for pattern in BUFF_EXPIRY_PATTERNS)
 
     async def _request_recast(self) -> None:
-        """Send the spellup command to recast all buffs."""
+        """Send the spellup command and extra buff commands."""
         try:
             await self.agent.send_command(SPELLUP_COMMAND)
-            self.logger.info("Sent spellup recast command")
+            for cmd in EXTRA_BUFF_COMMANDS:
+                await self.agent.send_command(cmd)
+            self.logger.info("Sent spellup and extra buff commands")
         except Exception as e:
-            self.logger.error(f"Error sending spellup command: {e}", exc_info=True)
+            self.logger.error(f"Error sending buff commands: {e}", exc_info=True)
 
     def _on_buff_expired(self, buff_name: str) -> None:
         """Handle a detected buff expiry.
