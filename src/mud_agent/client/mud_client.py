@@ -39,6 +39,7 @@ LOGIN_RESPONSE_DELAY = 3.0  # Delay after sending password to wait for login res
 SMALL_NEGOTIATION_DELAY = 0.1  # Small delay between protocol negotiations
 KEEP_ALIVE_INTERVAL = 10.0  # Seconds between keep-alive packets
 KEEP_ALIVE_TIMEOUT = 180.0  # Seconds of inactivity before connection is considered dead
+MAX_COMMAND_RESPONSES = 500  # Maximum number of response lines kept per command
 
 
 class MudClient:
@@ -640,7 +641,8 @@ class MudClient:
                         self.logger.info(
                             "Server closed connection (empty data received)"
                         )
-                        await self.disconnect()
+                        if await self._attempt_reconnect("server closed connection"):
+                            continue  # Restart the receive loop after reconnect
                         break
 
                     # Store raw data for debugging
@@ -712,7 +714,8 @@ class MudClient:
                                     current_time - self.last_command_time
                                     <= self.response_collection_timeout
                                 ):
-                                    self.command_responses.append(text)
+                                    if len(self.command_responses) < MAX_COMMAND_RESPONSES:
+                                        self.command_responses.append(text)
                                     self.last_command_time = current_time  # Reset timeout for additional responses
                                     self.logger.debug(
                                         f"Collected response for command '{self.current_command}' ({len(text)} chars)"
@@ -750,7 +753,8 @@ class MudClient:
 
                 except ConnectionError as e:
                     self.logger.error(f"Connection lost: {e}")
-                    await self.disconnect()
+                    if await self._attempt_reconnect(f"connection error: {e}"):
+                        continue  # Restart the receive loop after reconnect
                     raise
 
                 except Exception as e:
@@ -777,6 +781,11 @@ class MudClient:
         - GMCP data
         - MSDP data
         """
+        # Prepend any leftover bytes from the previous read
+        if self.command_buffer:
+            data = bytes(self.command_buffer) + data
+            self.command_buffer.clear()
+
         # Process raw data for telnet negotiations
         processed = bytearray()
         i = 0
@@ -845,6 +854,8 @@ class MudClient:
         telnet_commands.append("IAC")
 
         if i >= len(data):
+            # IAC at end of buffer — stash for next read
+            self.command_buffer.extend(b"\xff")
             return i, telnet_commands
 
         # Handle command
@@ -912,6 +923,9 @@ class MudClient:
             self._last_negotiation_task = asyncio.create_task(
                 self._handle_feature_negotiation(cmd, option)
             )
+        else:
+            # Missing option byte — stash IAC + cmd for next read
+            self.command_buffer.extend(bytes([TelnetBytes.IAC, cmd]))
 
         return i, telnet_commands
 
@@ -954,9 +968,11 @@ class MudClient:
 
             i = end + 2  # Skip to after SE
         else:
-            # Incomplete subnegotiation
-            telnet_commands.append("INCOMPLETE")
-            i = end
+            # Incomplete subnegotiation — stash IAC SB + partial data for next read
+            self.command_buffer.extend(bytes([TelnetBytes.IAC, TelnetBytes.SB]))
+            self.command_buffer.extend(data[i:])
+            telnet_commands.append("INCOMPLETE_BUFFERED")
+            i = len(data)  # Consume all remaining bytes
 
         return i, telnet_commands
 
@@ -1534,6 +1550,33 @@ class MudClient:
         finally:
             self.logger.info("Reader task finished")
 
+    async def _attempt_reconnect(self, reason: str) -> bool:
+        """Try to reconnect after a connection failure.
+
+        Args:
+            reason: Human-readable reason for the reconnect attempt
+
+        Returns:
+            True if reconnection succeeded, False otherwise.
+        """
+        self.logger.info(f"Attempting reconnect ({reason})...")
+        self.events.emit("connection_lost", reason)
+        try:
+            await self.disconnect()
+            reconnected = await self.connect(self.host, self.port)
+            if reconnected:
+                self.logger.info("Successfully reconnected")
+                self.events.emit("reconnected")
+                return True
+            else:
+                self.logger.error("Failed to reconnect")
+                self.events.emit("reconnect_failed")
+                return False
+        except Exception as e:
+            self.logger.error(f"Error during reconnection attempt: {e}", exc_info=True)
+            self.events.emit("reconnect_failed", str(e))
+            return False
+
     async def _keep_alive_task(self) -> None:
         """Keep-alive task to maintain connection with the server.
 
@@ -1588,23 +1631,7 @@ class MudClient:
                     )
                     self.events.emit("connection_timeout", time_since_last_received)
 
-                    # Try to reconnect
-                    try:
-                        self.logger.info("Attempting to reconnect...")
-                        await self.disconnect()
-                        reconnected = await self.connect(self.host, self.port)
-                        if reconnected:
-                            self.logger.info("Successfully reconnected")
-                            self.events.emit("reconnected")
-                        else:
-                            self.logger.error("Failed to reconnect")
-                            self.events.emit("reconnect_failed")
-                            break
-                    except Exception as e:
-                        self.logger.error(
-                            f"Error during reconnection attempt: {e}", exc_info=True
-                        )
-                        self.events.emit("reconnect_failed", str(e))
+                    if not await self._attempt_reconnect("keepalive timeout"):
                         break
         except asyncio.CancelledError:
             self.logger.info("Keep-alive task cancelled")
