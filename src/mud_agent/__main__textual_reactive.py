@@ -107,7 +107,13 @@ async def main() -> int:
             except Exception as e:
                 logger.error(f"Error disconnecting: {e}")
 
-            # 2. Cancel the periodic GMCP update task early — it depends on
+            # 2. Cancel any pending fire-and-forget event tasks on the client
+            try:
+                await agent.mud_tool.client.events.cancel_pending_tasks()
+            except Exception as e:
+                logger.error(f"Error cancelling pending event tasks: {e}")
+
+            # 3. Cancel the periodic GMCP update task early — it depends on
             #    the client connection which is now closed.
             gmcp_task = getattr(agent, "gmcp_update_task", None)
             if gmcp_task and not gmcp_task.done():
@@ -117,7 +123,7 @@ async def main() -> int:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-            # 3. Cancel the init task (may still be connecting/waiting for banner)
+            # 4. Cancel the init task (may still be connecting/waiting for banner)
             if not init_task.done():
                 init_task.cancel()
                 try:
@@ -125,7 +131,7 @@ async def main() -> int:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-            # 4. Cancel the receive_data task if it was started
+            # 5. Cancel the receive_data task if it was started
             receive_task = getattr(agent.mud_tool.client, "receive_task", None)
             if receive_task and not receive_task.done():
                 receive_task.cancel()
@@ -134,27 +140,27 @@ async def main() -> int:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-            # 5. Stop buff manager
+            # 6. Stop buff manager
             try:
                 await agent.buff_manager.stop()
             except Exception as e:
                 logger.error(f"Error stopping buff manager: {e}")
 
-            # 6. Stop tick manager BEFORE state manager — tick callbacks
+            # 7. Stop tick manager BEFORE state manager — tick callbacks
             #    invoke state_manager.on_tick, so tick must stop first.
             try:
                 agent.tick_manager.stop()
             except Exception as e:
                 logger.error(f"Error stopping tick manager: {e}")
 
-            # 7. Stop state manager
+            # 8. Stop state manager
             if agent.use_threaded_updates:
                 try:
                     agent.state_manager.stop_threads()
                 except Exception as e:
                     logger.error(f"Error stopping state manager: {e}")
 
-            # 8. Stop the sync worker (cancels _sync_loop task, closes remote DB)
+            # 9. Stop the sync worker (cancels _sync_loop task, closes remote DB)
             if agent.sync_worker:
                 try:
                     await agent.sync_worker.stop()

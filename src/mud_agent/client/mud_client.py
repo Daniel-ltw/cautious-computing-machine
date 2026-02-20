@@ -168,6 +168,7 @@ class MudClient:
             # Cancel any previous cleanup task to avoid wiping a future command's data
             if self._cleanup_task and not self._cleanup_task.done():
                 self._cleanup_task.cancel()
+                self._cleanup_task = None
             # Schedule cleanup after a delay instead of clearing immediately
             try:
                 cmd_name = (
@@ -436,9 +437,11 @@ class MudClient:
             if not self.connected or self.writer is None:
                 self.logger.error("Cannot send command - not connected to server")
                 self.logger.error(f"Connected: {self.connected}, Writer: {self.writer}")
-                # Emit a 'connection_error' event
                 self.events.emit("connection_error", "Not connected to server")
                 raise ConnectionError("Not connected to server")
+            # Capture writer reference under the lock so a concurrent
+            # disconnect() cannot null it between the check and the write.
+            writer = self.writer
 
         try:
             # Ensure command ends with newline
@@ -484,11 +487,11 @@ class MudClient:
 
             # Encode and send command
             encoded_command = command.encode()
-            self.writer.write(encoded_command)
+            writer.write(encoded_command)
 
             # Make sure to drain the writer to ensure the command is sent
             try:
-                await asyncio.wait_for(self.writer.drain(), timeout=5.0)
+                await asyncio.wait_for(writer.drain(), timeout=5.0)
                 self.logger.info(f"Command '{stripped_command}' sent successfully")
 
                 # Update last sent time for keep-alive tracking
@@ -499,8 +502,8 @@ class MudClient:
             except TimeoutError:
                 self.logger.error(f"Timeout while sending command '{stripped_command}'")
                 # Try to recover by resetting the writer
-                if hasattr(self.writer, "transport"):
-                    self.writer.transport.abort()
+                if hasattr(writer, "transport"):
+                    writer.transport.abort()
                     self.logger.info("Aborted writer transport due to timeout")
                 # Emit a 'command_error' event
                 self.events.emit(
@@ -1429,6 +1432,7 @@ class MudClient:
         async with self._connection_lock:
             if not self.gmcp.enabled or not self.writer:
                 return
+            writer = self.writer
 
         try:
             # Format GMCP message
@@ -1448,8 +1452,8 @@ class MudClient:
                 + payload
                 + bytes([TelnetBytes.IAC, TelnetBytes.SE])
             )
-            self.writer.write(command)
-            await self.writer.drain()
+            writer.write(command)
+            await writer.drain()
             logger.debug(f"Sent GMCP: {module}")
 
         except Exception as e:
