@@ -141,10 +141,9 @@ class AardwolfGMCPManager:
 
             try:
                 if self._kg_update_task is None:
-                    import asyncio as _asyncio
-                    self._kg_update_task = _asyncio.create_task(self._run_kg_update_loop())
-            except Exception:
-                pass
+                    self._kg_update_task = asyncio.create_task(self._run_kg_update_loop())
+            except Exception as e:
+                self.logger.error(f"Failed to start KG update loop: {e}", exc_info=True)
             return True
         except Exception as e:
             self.logger.error(f"Error initializing Aardwolf GMCP: {e}", exc_info=True)
@@ -308,22 +307,6 @@ class AardwolfGMCPManager:
             dict: Combined character data or empty dict if not available
         """
         return self.character_processor.get_character_data()
-
-    def get_room_info(self) -> dict[str, Any]:
-        """Get room information from GMCP data.
-
-        Returns:
-            dict: Room information or empty dict if not available
-        """
-        return self.room_processor.get_room_info()
-
-    def get_map_data(self) -> str:
-        """Get map data from GMCP.
-
-        Returns:
-            str: Map data or empty string if not available
-        """
-        return self.map_processor.get_map_data()
 
     # Quest data method removed
 
@@ -537,29 +520,17 @@ class AardwolfGMCPManager:
             self.logger.error(f"Error requesting map data: {e}", exc_info=True)
 
     def get_map_data(self) -> str:
-        """Get the map data from GMCP.
-
-        Note: Map data is not available via GMCP in Aardwolf.
-        This method is kept for backward compatibility and will always return an empty string.
+        """Get map data from GMCP.
 
         Returns:
-            str: Map data (empty string since map data is not available via GMCP)
+            str: Map data or empty string if not available
         """
-        # Map data is not available via GMCP in Aardwolf
-        # This method is kept for backward compatibility
-        return ""
+        return self.map_processor.get_map_data()
 
-    def get_room_info(self) -> dict:
-        """Get the room information from GMCP.
+    def get_room_info(self) -> dict[str, Any]:
+        """Get room information from GMCP data.
 
         Returns:
-            dict: Room information from GMCP
+            dict: Normalised room information or empty dict if not available
         """
-        try:
-            # Check if we have room data
-            if "info" in self.room_data:
-                return self.room_data["info"]
-            return {}
-        except Exception as e:
-            self.logger.error(f"Error getting room info: {e}", exc_info=True)
-            return {}
+        return self.room_processor.get_room_info()

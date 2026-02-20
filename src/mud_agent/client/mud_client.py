@@ -59,6 +59,7 @@ class MudClient:
         self.connected = False
         self.data_callback: Callable[[str], None] | None = None
         self._receive_lock = asyncio.Lock()
+        self._connection_lock = asyncio.Lock()  # Protects connected/reader/writer
         self._negotiation_event = asyncio.Event()
         self.logger = logging.getLogger(__name__)
 
@@ -89,6 +90,7 @@ class MudClient:
         self.command_responses = []
         self.last_command_time = 0
         self.response_collection_timeout = RESPONSE_COLLECTION_TIMEOUT
+        self._cleanup_task: asyncio.Task | None = None
 
         # Command queue for prioritizing user commands
         self.command_queue = []
@@ -163,17 +165,20 @@ class MudClient:
         # For all commands, we'll keep responses in memory for a short time
         # This allows for retries and better response handling
         if clear:
+            # Cancel any previous cleanup task to avoid wiping a future command's data
+            if self._cleanup_task and not self._cleanup_task.done():
+                self._cleanup_task.cancel()
             # Schedule cleanup after a delay instead of clearing immediately
             try:
-                import asyncio
-
                 cmd_name = (
                     self.current_command.lower() if self.current_command else "unknown"
                 )
                 self.logger.debug(
                     f"Scheduling delayed cleanup for '{cmd_name}' command responses"
                 )
-                asyncio.create_task(self._delayed_response_cleanup(3.0))
+                self._cleanup_task = asyncio.create_task(
+                    self._delayed_response_cleanup(3.0)
+                )
             except Exception as e:
                 self.logger.error(
                     f"Error scheduling delayed response cleanup: {e}", exc_info=True
@@ -191,15 +196,14 @@ class MudClient:
             delay_seconds: The number of seconds to delay before cleanup
         """
         try:
-            import asyncio
-
-            # Wait for the specified delay
             await asyncio.sleep(delay_seconds)
 
             # Clear the command responses
             self.command_responses = []
             self.current_command = None
             self.logger.debug(f"Cleared command responses after {delay_seconds}s delay")
+        except asyncio.CancelledError:
+            pass  # Cancelled by a new command — expected
         except Exception as e:
             self.logger.error(f"Error in delayed response cleanup: {e}", exc_info=True)
 
@@ -348,6 +352,7 @@ class MudClient:
 
             # Then, we'll send WILL for options we want to enable on our side
             client_options = [
+                TelnetBytes.GMCP,  # We can receive GMCP data (bidirectional per spec)
                 TelnetBytes.SUPPRESS_GA,  # We'll suppress GA
                 TelnetBytes.NAWS,  # We'll negotiate about window size
             ]
@@ -406,9 +411,10 @@ class MudClient:
                     # Emit a 'disconnect_error' event
                     self.events.emit("disconnect_error", str(e))
         finally:
-            self.writer = None
-            self.reader = None
-            self.connected = False
+            async with self._connection_lock:
+                self.writer = None
+                self.reader = None
+                self.connected = False
             self.logger.info("Disconnected from server")
 
             # Emit a 'disconnected' event
@@ -426,12 +432,13 @@ class MudClient:
             ConnectionError: If not connected or writer is None
             RuntimeError: If error occurs while sending command
         """
-        if not self.connected or self.writer is None:
-            self.logger.error("Cannot send command - not connected to server")
-            self.logger.error(f"Connected: {self.connected}, Writer: {self.writer}")
-            # Emit a 'connection_error' event
-            self.events.emit("connection_error", "Not connected to server")
-            raise ConnectionError("Not connected to server")
+        async with self._connection_lock:
+            if not self.connected or self.writer is None:
+                self.logger.error("Cannot send command - not connected to server")
+                self.logger.error(f"Connected: {self.connected}, Writer: {self.writer}")
+                # Emit a 'connection_error' event
+                self.events.emit("connection_error", "Not connected to server")
+                raise ConnectionError("Not connected to server")
 
         try:
             # Ensure command ends with newline
@@ -467,6 +474,10 @@ class MudClient:
             # Emit a 'command_sent' event before sending (old format for backward compat)
 
 
+            # Cancel any pending cleanup from the previous command
+            if self._cleanup_task and not self._cleanup_task.done():
+                self._cleanup_task.cancel()
+                self._cleanup_task = None
             # Set the current command and reset response collection
             self.current_command = stripped_command
             self.command_responses = []
@@ -1415,8 +1426,9 @@ class MudClient:
             module: The GMCP module name
             data: The data to send (will be JSON encoded)
         """
-        if not self.gmcp.enabled or not self.writer:
-            return
+        async with self._connection_lock:
+            if not self.gmcp.enabled or not self.writer:
+                return
 
         try:
             # Format GMCP message
@@ -1429,6 +1441,8 @@ class MudClient:
 
             # Send as telnet subnegotiation
             payload = message.encode("utf-8")
+            # Escape any IAC (0xFF) bytes in the payload per RFC 854
+            payload = payload.replace(b"\xff", b"\xff\xff")
             command = (
                 bytes([TelnetBytes.IAC, TelnetBytes.SB, TelnetBytes.GMCP])
                 + payload

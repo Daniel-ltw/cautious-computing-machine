@@ -121,14 +121,15 @@ def test_get_character_data(gmcp_manager):
 
 def test_get_room_info(gmcp_manager):
     """Test getting room information."""
-    # Set the room_data['info'] directly
+    # Set the room_data['info'] using Aardwolf's actual GMCP format
+    # (Aardwolf sends "zone" and "coord" rather than "area" and "coordinates")
     gmcp_manager.room_data["info"] = {
         "name": "Test Room",
         "num": 1234,
-        "area": "Test Area",
+        "zone": "Test Area",
         "exits": {"north": 1, "south": 2},
         "terrain": "indoors",
-        "coordinates": {"x": 10, "y": 20, "z": 0},
+        "coord": {"x": 10, "y": 20, "z": 0},
     }
 
     # Call the method
@@ -137,15 +138,16 @@ def test_get_room_info(gmcp_manager):
     # Check that the returned data contains the expected keys
     assert "name" in room_info
     assert "num" in room_info
-    assert "area" in room_info
+    assert "area" in room_info  # "area" is set from "zone" for backward compat
     assert "exits" in room_info
     assert "terrain" in room_info
-    assert "coordinates" in room_info
+    assert "coordinates" in room_info  # "coordinates" is set from "coord"
 
     # Check that the values are as expected
     assert room_info["name"] == "Test Room"
     assert room_info["num"] == 1234
     assert room_info["area"] == "Test Area"
+    assert room_info["zone"] == "Test Area"
     assert room_info["exits"] == {"north": 1, "south": 2}
     assert room_info["terrain"] == "indoors"
     assert room_info["coordinates"] == {"x": 10, "y": 20, "z": 0}

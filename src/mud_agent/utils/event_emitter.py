@@ -23,6 +23,7 @@ class EventEmitter:
         """Initialize the event emitter."""
         self._listeners: dict[str, list[Callable]] = {}
         self._once_listeners: dict[str, list[Callable]] = {}
+        self._pending_tasks: set[asyncio.Task] = set()
         self.logger = logging.getLogger(__name__)
 
     def on(self, event: str, callback: Callable) -> None:
@@ -75,6 +76,29 @@ class EventEmitter:
                 self._once_listeners[event].remove(callback)
                 self.logger.debug(f"Removed one-time listener for event '{event}'")
 
+    def _schedule_coroutine(self, coro, event: str) -> None:
+        """Schedule a coroutine as a tracked task.
+
+        Args:
+            coro: The coroutine to schedule
+            event: The event name (for logging)
+        """
+        task = asyncio.create_task(coro)
+        self._pending_tasks.add(task)
+
+        def _on_done(t: asyncio.Task, _event: str = event) -> None:
+            self._pending_tasks.discard(t)
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc:
+                self.logger.error(
+                    f"Error in async event listener for '{_event}': {exc}",
+                    exc_info=exc,
+                )
+
+        task.add_done_callback(_on_done)
+
     def emit(self, event: str, *args: Any, **kwargs: Any) -> None:
         """Emit an event.
 
@@ -88,47 +112,22 @@ class EventEmitter:
             for callback in self._listeners[event]:
                 try:
                     result = callback(*args, **kwargs)
-                    # If the callback returns a coroutine, schedule it
                     if asyncio.iscoroutine(result):
-                        # Create a task with proper error handling
-                        task = asyncio.create_task(result)
-                        # Add error handling for the task
-                        task.add_done_callback(
-                            lambda t: self.logger.error(
-                                f"Error in async event listener for '{event}': {t.exception()}",
-                                exc_info=t.exception(),
-                            )
-                            if t.exception()
-                            else None
-                        )
+                        self._schedule_coroutine(result, event)
                 except Exception as e:
                     self.logger.error(
                         f"Error in event listener for '{event}': {e}", exc_info=True
                     )
-                    # Continue processing other listeners even if one fails
 
         # Call one-time listeners
         if event in self._once_listeners:
-            # Make a copy of the listeners to avoid modifying the list while iterating
             listeners = self._once_listeners[event].copy()
-            # Clear the list before calling the listeners to prevent recursion issues
             self._once_listeners[event] = []
             for callback in listeners:
                 try:
                     result = callback(*args, **kwargs)
-                    # If the callback returns a coroutine, schedule it
                     if asyncio.iscoroutine(result):
-                        # Create a task with proper error handling
-                        task = asyncio.create_task(result)
-                        # Add error handling for the task
-                        task.add_done_callback(
-                            lambda t: self.logger.error(
-                                f"Error in async one-time event listener for '{event}': {t.exception()}",
-                                exc_info=t.exception(),
-                            )
-                            if t.exception()
-                            else None
-                        )
+                        self._schedule_coroutine(result, event)
                 except Exception as e:
                     self.logger.error(
                         f"Error in one-time event listener for '{event}': {e}",
@@ -136,7 +135,7 @@ class EventEmitter:
                     )
 
         # Log the event if it's not a high-frequency event
-        if event not in ["data", "tick", "gmcp_data"]:
+        if event not in {"data", "tick", "gmcp_data"}:
             self.logger.debug(f"Emitted event '{event}'")
 
     async def emit_async(self, event: str, *args: Any, **kwargs: Any) -> None:
@@ -185,5 +184,21 @@ class EventEmitter:
             await asyncio.gather(*tasks)
 
         # Log the event if it's not a high-frequency event
-        if event not in ["data", "tick", "gmcp_data"]:
+        if event not in {"data", "tick", "gmcp_data"}:
             self.logger.debug(f"Emitted async event '{event}'")
+
+    async def cancel_pending_tasks(self) -> None:
+        """Cancel all pending async tasks created by emit().
+
+        Call this during shutdown to ensure no orphaned tasks remain.
+        """
+        if not self._pending_tasks:
+            return
+        self.logger.debug(f"Cancelling {len(self._pending_tasks)} pending event tasks")
+        for task in list(self._pending_tasks):
+            if not task.done():
+                task.cancel()
+        # Wait briefly for cancellation to propagate
+        if self._pending_tasks:
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
+        self._pending_tasks.clear()

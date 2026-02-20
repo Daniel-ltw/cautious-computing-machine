@@ -94,61 +94,21 @@ async def main() -> int:
             logger.error(f"An error occurred: {e}", exc_info=True)
             return 1
         finally:
-            # Clean up everything so the process can exit
+            # Clean up everything so the process can exit.
+            # Order matters: stop data sources first, then consumers,
+            # then background workers.
             logger.info("Shutting down...")
 
-            # 1. Disconnect from MUD server first — this sets client.connected=False
-            #    which causes receive_data() loop to exit naturally
+            # 1. Disconnect from MUD server — sets client.connected=False
+            #    which causes receive_data() loop to exit naturally.
+            #    Also cancels the keep-alive task internally.
             try:
                 await agent.disconnect()
             except Exception as e:
                 logger.error(f"Error disconnecting: {e}")
 
-            # 2. Cancel the init task (may still be connecting/waiting for banner)
-            if not init_task.done():
-                init_task.cancel()
-                try:
-                    await init_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
-            # 3. Cancel the receive_data task if it was started
-            receive_task = getattr(agent.mud_tool.client, "receive_task", None)
-            if receive_task and not receive_task.done():
-                receive_task.cancel()
-                try:
-                    await receive_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-
-            # 3.5. Stop buff manager
-            if agent.buff_manager.active:
-                try:
-                    await agent.buff_manager.stop()
-                except Exception as e:
-                    logger.error(f"Error stopping buff manager: {e}")
-
-            # 4. Stop the sync worker (cancels _sync_loop task, closes remote DB)
-            if agent.sync_worker:
-                try:
-                    await agent.sync_worker.stop()
-                except Exception as e:
-                    logger.error(f"Error stopping sync worker: {e}")
-
-            # 5. Stop tick manager thread
-            try:
-                agent.tick_manager.stop()
-            except Exception as e:
-                logger.error(f"Error stopping tick manager: {e}")
-
-            # 6. Stop state manager
-            if agent.use_threaded_updates:
-                try:
-                    agent.state_manager.stop_threads()
-                except Exception as e:
-                    logger.error(f"Error stopping state manager: {e}")
-
-            # 7. Cancel the periodic GMCP update task
+            # 2. Cancel the periodic GMCP update task early — it depends on
+            #    the client connection which is now closed.
             gmcp_task = getattr(agent, "gmcp_update_task", None)
             if gmcp_task and not gmcp_task.done():
                 gmcp_task.cancel()
@@ -157,14 +117,49 @@ async def main() -> int:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-            # 8. Cancel keep-alive task on the client
-            keep_alive = getattr(agent.client, "keep_alive_task", None)
-            if keep_alive and not keep_alive.done():
-                keep_alive.cancel()
+            # 3. Cancel the init task (may still be connecting/waiting for banner)
+            if not init_task.done():
+                init_task.cancel()
                 try:
-                    await keep_alive
+                    await init_task
                 except (asyncio.CancelledError, Exception):
                     pass
+
+            # 4. Cancel the receive_data task if it was started
+            receive_task = getattr(agent.mud_tool.client, "receive_task", None)
+            if receive_task and not receive_task.done():
+                receive_task.cancel()
+                try:
+                    await receive_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+            # 5. Stop buff manager
+            try:
+                await agent.buff_manager.stop()
+            except Exception as e:
+                logger.error(f"Error stopping buff manager: {e}")
+
+            # 6. Stop tick manager BEFORE state manager — tick callbacks
+            #    invoke state_manager.on_tick, so tick must stop first.
+            try:
+                agent.tick_manager.stop()
+            except Exception as e:
+                logger.error(f"Error stopping tick manager: {e}")
+
+            # 7. Stop state manager
+            if agent.use_threaded_updates:
+                try:
+                    agent.state_manager.stop_threads()
+                except Exception as e:
+                    logger.error(f"Error stopping state manager: {e}")
+
+            # 8. Stop the sync worker (cancels _sync_loop task, closes remote DB)
+            if agent.sync_worker:
+                try:
+                    await agent.sync_worker.stop()
+                except Exception as e:
+                    logger.error(f"Error stopping sync worker: {e}")
 
             logger.info("Shutdown complete.")
 
