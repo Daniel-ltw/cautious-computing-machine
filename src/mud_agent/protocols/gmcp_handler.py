@@ -28,6 +28,16 @@ class GMCPHandler:
         supported_modules: Set of GMCP modules supported by the server
     """
 
+    # Top-level GMCP module prefixes we accept.  Any module whose first
+    # dotted component is NOT in this set will be logged and dropped.
+    ALLOWED_MODULE_PREFIXES: set[str] = {
+        "char",
+        "room",
+        "comm",
+        "group",
+        "core",
+    }
+
     def __init__(self):
         """Initialize the GMCP handler."""
         self.enabled = True
@@ -142,6 +152,14 @@ class GMCPHandler:
             else:
                 module = message[:space_idx]
                 data = json.loads(message[space_idx + 1 :])
+
+            # Validate module against allowed prefixes
+            top_level = module.split(".")[0].lower()
+            if top_level not in self.ALLOWED_MODULE_PREFIXES:
+                logger.warning(
+                    f"Rejected GMCP module with unknown prefix '{top_level}': {module}"
+                )
+                return None, None
 
             # Check if this is a new module
             if module not in self.supported_modules:
