@@ -29,16 +29,16 @@ class Migration:
 
     def apply(self):
         """Apply the migration."""
-        print(f"Applying migration {self.version}: {self.description}")
+        logger.info(f"Applying migration {self.version}: {self.description}")
         self.up_func()
 
     def rollback(self):
         """Rollback the migration."""
         if self.down_func:
-            print(f"Rolling back migration {self.version}: {self.description}")
+            logger.info(f"Rolling back migration {self.version}: {self.description}")
             self.down_func()
         else:
-            print(f"No rollback available for migration {self.version}")
+            logger.warning(f"No rollback available for migration {self.version}")
 
 
 class MigrationManager:
@@ -150,7 +150,7 @@ class MigrationManager:
                 "CREATE INDEX IF NOT EXISTS idx_relation_timestamp ON relation (created_at)"
             )
 
-        print("✓ Created all tables and indexes")
+        logger.info("Migration 001: Created all tables and indexes")
 
     def _migration_001_down(self):
         """Migration 001 rollback: Drop all tables."""
@@ -176,8 +176,10 @@ class MigrationManager:
                         DateTimeField(null=True, default=None)),
                 )
             except Exception as e:
-                # Column may already exist
-                logger.warning(f"Migration 002: Could not add columns to {table}: {e}")
+                if "duplicate column" in str(e).lower():
+                    logger.debug(f"Migration 002: Columns already exist on {table}")
+                else:
+                    raise
 
     def _migration_002_down(self):
         """Remove sync tracking columns."""
@@ -201,16 +203,22 @@ class MigrationManager:
         if target_version is None:
             target_version = max(m.version for m in self.migrations) if self.migrations else 0
 
-        print(f"Current schema version: {current_version}")
-        print(f"Target schema version: {target_version}")
+        logger.info(f"Current schema version: {current_version}")
+        logger.info(f"Target schema version: {target_version}")
 
         if current_version == target_version:
-            print("Database is already up to date")
+            logger.info("Database is already up to date")
             return
 
         if current_version > target_version:
-            print("Downgrade not supported in this simple migration system")
-            return
+            # Legacy DB from old migration system (which used versions up to 13).
+            # Reset to 0 and re-run all migrations; they are idempotent.
+            logger.warning(
+                f"Schema version {current_version} exceeds max migration version "
+                f"{target_version} — assuming legacy database, re-running all migrations"
+            )
+            current_version = 0
+            self._set_schema_version(0)
 
         # Apply migrations
         for migration in sorted(self.migrations, key=lambda m: m.version):
@@ -218,19 +226,19 @@ class MigrationManager:
                 try:
                     migration.apply()
                     self._set_schema_version(migration.version)
-                    print(f"✓ Migration {migration.version} completed")
+                    logger.info(f"Migration {migration.version} completed")
                 except Exception as e:
-                    print(f"✗ Migration {migration.version} failed: {e}")
+                    logger.error(f"Migration {migration.version} failed: {e}")
                     raise
 
-        print(f"Migration completed. Database is now at version {target_version}")
+        logger.info(f"Migration completed. Database is now at version {target_version}")
 
     def rollback(self, target_version: int):
         """Rollback migrations to the target version."""
         current_version = self._get_schema_version()
 
         if current_version <= target_version:
-            print("Nothing to rollback")
+            logger.info("Nothing to rollback")
             return
 
         # Rollback migrations in reverse order
@@ -239,22 +247,21 @@ class MigrationManager:
                 try:
                     migration.rollback()
                     self._set_schema_version(migration.version - 1)
-                    print(f"✓ Rollback {migration.version} completed")
+                    logger.info(f"Rollback {migration.version} completed")
                 except Exception as e:
-                    print(f"✗ Rollback {migration.version} failed: {e}")
+                    logger.error(f"Rollback {migration.version} failed: {e}")
                     raise
 
-        print(f"Rollback completed. Database is now at version {target_version}")
+        logger.info(f"Rollback completed. Database is now at version {target_version}")
 
     def status(self):
         """Show migration status."""
         current_version = self._get_schema_version()
-        print(f"Current schema version: {current_version}")
-        print("\nAvailable migrations:")
+        logger.info(f"Current schema version: {current_version}")
 
         for migration in sorted(self.migrations, key=lambda m: m.version):
-            status = "✓ Applied" if migration.version <= current_version else "✗ Pending"
-            print(f"  {migration.version:03d}: {migration.description} [{status}]")
+            status = "Applied" if migration.version <= current_version else "Pending"
+            logger.info(f"  {migration.version:03d}: {migration.description} [{status}]")
 
 
 def init_database(db_path: str = None) -> MigrationManager:

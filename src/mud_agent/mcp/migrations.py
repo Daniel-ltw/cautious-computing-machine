@@ -6,11 +6,14 @@ This module provides a simple migration system to manage schema changes
 for the SQLite database using Peewee ORM models.
 """
 
+import logging
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
 from ..db.models import NPC, Entity, Observation, Relation, Room, RoomExit, db
+
+logger = logging.getLogger(__name__)
 
 
 class Migration:
@@ -541,6 +544,9 @@ class MigrationManager:
 
     def _migration_012_up(self):
         """Migration 012: Add sync tracking columns to all tables."""
+        if db.is_closed():
+            db.connect()
+
         tables = ['entity', 'room', 'roomexit', 'npc', 'observation', 'relation']
         for table in tables:
             with db.atomic():
@@ -548,15 +554,21 @@ class MigrationManager:
                     db.execute_sql(
                         f"ALTER TABLE {table} ADD COLUMN sync_status VARCHAR(10) NOT NULL DEFAULT 'dirty'"
                     )
-                except Exception:
-                    pass  # Column likely exists
+                except Exception as e:
+                    if "duplicate column" in str(e).lower():
+                        pass  # Column already exists
+                    else:
+                        raise
                 try:
                     db.execute_sql(
                         f"ALTER TABLE {table} ADD COLUMN remote_updated_at DATETIME"
                     )
-                except Exception:
-                    pass  # Column likely exists
-        print("✓ Added sync_status and remote_updated_at columns to all tables")
+                except Exception as e:
+                    if "duplicate column" in str(e).lower():
+                        pass  # Column already exists
+                    else:
+                        raise
+        logger.info("Added sync_status and remote_updated_at columns to all tables")
 
     def _migration_012_down(self):
         """Migration 012 rollback: Remove sync tracking columns."""

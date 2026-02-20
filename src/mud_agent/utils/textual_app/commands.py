@@ -36,8 +36,6 @@ class CommandProcessor:
         self.logger = logger
         self.exploring = False
         self.exploration_task = None
-        self.auto_spellup = False
-        self.auto_spellup_task = None
 
     async def submit_command(self, command: str) -> None:
         """Submit a command for processing.
@@ -99,17 +97,17 @@ class CommandProcessor:
                 await self.handle_mobhunt(area)
 
             elif command == "/ac":
-                self.auto_spellup = not self.auto_spellup
                 command_log = self.app.query_one("#command-log", CommandLog)
-                if self.auto_spellup:
-                    command_log.write("[bold cyan]Autocast: [/bold cyan][bold red]On[/bold red]")
-                    if not self.auto_spellup_task or self.auto_spellup_task.done():
-                        self.auto_spellup_task = asyncio.create_task(self.handle_autocast())
+                if self.agent.buff_manager.active:
+                    await self.agent.buff_manager.stop()
+                    command_log.write(
+                        "[bold cyan]Buff Manager: [/bold cyan][bold red]Off[/bold red]"
+                    )
                 else:
-                    command_log.write("[bold cyan]Autocast: [/bold cyan][bold red]Off[/bold red]")
-                    if self.auto_spellup_task and not self.auto_spellup_task.done():
-                        self.auto_spellup_task.cancel()
-                    self.auto_spellup_task = None
+                    await self.agent.buff_manager.start()
+                    command_log.write(
+                        "[bold cyan]Buff Manager: [/bold cyan][bold green]On[/bold green]"
+                    )
 
             elif command.startswith("/rf "):
                 room_name = command[4:].strip()
@@ -135,7 +133,9 @@ class CommandProcessor:
                     command_log.write("[bold yellow]Automation disabled[/bold yellow]")
                 else:
                     await self.agent.automation_manager.enable_automation(context)
-                    command_log.write(f"[bold green]Automation enabled with context:[/bold green] {context}")
+                    command_log.write(
+                        f"[bold green]Automation enabled with context:[/bold green] {context}"
+                    )
 
             elif command.startswith("/ur"):
                 # Extract optional NPC name parameter
@@ -164,14 +164,22 @@ class CommandProcessor:
                     self.agent.quest_manager._play_alert_sound()
                     command_log.write("[bold green]Alert sound triggered.[/bold green]")
                 else:
-                    command_log.write("[bold red]QuestManager not found on agent.[/bold red]")
+                    command_log.write(
+                        "[bold red]QuestManager not found on agent.[/bold red]"
+                    )
 
             else:
-                command_log.write(f"[bold yellow]Unknown internal command: {command}[/bold yellow]")
-                command_log.write("[bold cyan]Type /help for available commands[/bold cyan]")
+                command_log.write(
+                    f"[bold yellow]Unknown internal command: {command}[/bold yellow]"
+                )
+                command_log.write(
+                    "[bold cyan]Type /help for available commands[/bold cyan]"
+                )
 
         except Exception as e:
-            logger.error(f"Error handling internal command '{command}': {e}", exc_info=True)
+            logger.error(
+                f"Error handling internal command '{command}': {e}", exc_info=True
+            )
             command_log.write(f"[bold red]Error executing command: {e}[/bold red]")
 
     async def handle_speedwalk(self, area: str) -> None:
@@ -183,17 +191,20 @@ class CommandProcessor:
         command_log = self.app.query_one("#command-log", CommandLog)
         command_log.write(f"[bold cyan]Looking for speedwalk to: {area}[/bold cyan]")
 
-        if (self.state_manager.room_name == "The Aardwolf Plaza Hotel" or
-            self.state_manager.room_num == 26151):
-                await self.agent.send_command("d")
-        elif (self.state_manager.room_name == "The Grand City of Aylor" or
-            self.state_manager.room_num == 32418):
+        if (
+            self.state_manager.room_name == "The Aardwolf Plaza Hotel"
+            or self.state_manager.room_num == 26151
+        ):
+            await self.agent.send_command("d")
+        elif (
+            self.state_manager.room_name == "The Grand City of Aylor"
+            or self.state_manager.room_num == 32418
+        ):
             pass
         else:
             # Use the knowledge graph to find the path
             path_info = await self.agent.knowledge_graph.find_path_between_rooms(
-                start_room_id=self.state_manager.room_num,
-                end_room_identifier=32418
+                start_room_id=self.state_manager.room_num, end_room_identifier=32418
             )
 
             if path_info and path_info.get("path"):
@@ -201,7 +212,9 @@ class CommandProcessor:
                 cost = path_info.get("cost", "N/A")
                 run_command_str = self._compress_path(path)
 
-                command_log.write(f"[bold green]Path found to 'The Grand City of Aylor' (cost: {cost}):[/bold green]")
+                command_log.write(
+                    f"[bold green]Path found to 'The Grand City of Aylor' (cost: {cost}):[/bold green]"
+                )
                 command_log.write(f"[cyan]{run_command_str}[/cyan]")
                 await self.agent.send_command(run_command_str)
 
@@ -224,17 +237,19 @@ class CommandProcessor:
 
             if response_text:
                 for line in response_text:
-                    if mob.lower() in line.text.lower() and re.search(r'\s{2,}', line.text):
+                    if mob.lower() in line.text.lower() and re.search(
+                        r"\s{2,}", line.text
+                    ):
                         response_line = line.text
                         break
 
             room_name = None
             if response_line:
                 # Using a more specific regex to separate mob from room, assuming room name starts with a capital
-                match = re.search(r'^(.*?)\s{2,}([A-Z].*)$', response_line)
+                match = re.search(r"^(.*?)\s{2,}([A-Z].*)$", response_line)
                 if not match:
                     # Fallback to the original less specific regex if the above fails
-                    match = re.search(r'^(.*)\s{2,}(.+)$', response_line)
+                    match = re.search(r"^(.*)\s{2,}(.+)$", response_line)
 
                 if match:
                     mob_desc = match.group(1).strip()
@@ -275,7 +290,7 @@ class CommandProcessor:
         i = 0
         while i < len(path):
             command = path[i]
-            if command and re.match(r'^[neswud]$', command):
+            if command and re.match(r"^[neswud]$", command):
                 count = 1
                 j = i + 1
                 while j < len(path) and path[j] == command:
@@ -296,7 +311,7 @@ class CommandProcessor:
         final_commands = []
         movement_group = []
         for cmd in compressed_path:
-            if re.match(r'^\d*[neswud]$', cmd):
+            if re.match(r"^\d*[neswud]$", cmd):
                 movement_group.append(cmd)
             else:
                 if movement_group:
@@ -333,19 +348,6 @@ class CommandProcessor:
 
         return ";".join(final_commands)
 
-    async def handle_autocast(self):
-        while True:
-            if not self.auto_spellup:
-                return
-
-            # Use configured autocast commands or fallback to default
-            skills_spells = ["nimble", "hide", "sneak", "cast under"]
-            if hasattr(self.agent, "config") and hasattr(self.agent.config, "agent"):
-                skills_spells = self.agent.config.agent.autocast_commands
-
-            for cmd in skills_spells:
-                await self.agent.send_command(cmd)
-            await asyncio.sleep(random.uniform(15.0, 60.0))
 
     async def find_direction_and_walk_to_room(self, room_name: str) -> None:
         """Find a path to the specified room using the knowledge graph and pre-fill the run command.
@@ -359,14 +361,16 @@ class CommandProcessor:
         try:
             current_room_num = self.state_manager.room_num
             if not current_room_num:
-                command_log.write("[bold red]Error: Current room number is unknown. Cannot find path.[/bold red]")
+                command_log.write(
+                    "[bold red]Error: Current room number is unknown. Cannot find path.[/bold red]"
+                )
                 return
 
             # Use the knowledge graph to find the path
             path_info = await self.agent.knowledge_graph.find_path_between_rooms(
                 start_room_id=current_room_num,
                 end_room_identifier=room_name,
-                max_depth=1000
+                max_depth=1000,
             )
 
             if path_info and path_info.get("path"):
@@ -374,19 +378,27 @@ class CommandProcessor:
                 cost = path_info.get("cost", "N/A")
                 run_command_str = self._compress_path(path)
 
-                command_log.write(f"[bold green]Path found to '{room_name}' (cost: {cost}):[/bold green]")
+                command_log.write(
+                    f"[bold green]Path found to '{room_name}' (cost: {cost}):[/bold green]"
+                )
                 command_log.write(f"[cyan]{run_command_str}[/cyan]")
 
                 # Pre-fill the command input
                 self.prefill_command_input(run_command_str)
             else:
-                command_log.write(f"[bold red]No path found to room: {room_name}[/bold red]")
-                command_log.write("[dim]The room may not be in the knowledge graph, or there is no known path.[/dim]")
+                command_log.write(
+                    f"[bold red]No path found to room: {room_name}[/bold red]"
+                )
+                command_log.write(
+                    "[dim]The room may not be in the knowledge graph, or there is no known path.[/dim]"
+                )
 
         except PathfindingError as e:
             command_log.write(f"[bold red]{e}[/bold red]")
         except Exception as e:
-            logger.error(f"Error in find_direction_and_walk_to_room: {e}", exc_info=True)
+            logger.error(
+                f"Error in find_direction_and_walk_to_room: {e}", exc_info=True
+            )
             command_log.write(f"[bold red]Error finding path: {e}[/bold red]")
 
     async def handle_update_room_command(self, npc_name: str = None) -> None:
@@ -399,58 +411,74 @@ class CommandProcessor:
 
         try:
             if npc_name:
-                command_log.write(f"[bold cyan]Updating room data with NPC '{npc_name}'...[/bold cyan]")
+                command_log.write(
+                    f"[bold cyan]Updating room data with NPC '{npc_name}'...[/bold cyan]"
+                )
             else:
                 command_log.write("[bold cyan]Updating room data...[/bold cyan]")
 
             # Get current room information from GMCP
-            room_data = self.agent.aardwolf_gmcp.get_room_info() if hasattr(self.agent, 'aardwolf_gmcp') else {}
+            room_data = (
+                self.agent.aardwolf_gmcp.get_room_info()
+                if hasattr(self.agent, "aardwolf_gmcp")
+                else {}
+            )
 
-            if not room_data or not room_data.get('name') or not room_data.get('num'):
-                command_log.write("[bold red]Error: Current room is unknown. Try 'look' first.[/bold red]")
+            if not room_data or not room_data.get("name") or not room_data.get("num"):
+                command_log.write(
+                    "[bold red]Error: Current room is unknown. Try 'look' first.[/bold red]"
+                )
                 return
 
             # Prepare the data for the knowledge graph
             entity_data = {
-                "room_number": room_data.get('num'),
+                "room_number": room_data.get("num"),
                 "entityType": "Room",
-                "name": room_data.get('name'),
-                "description": room_data.get('desc', ''),
-                "exits": room_data.get('exits', {}),
-                "area": room_data.get('zone', 'Unknown'),
-                "coordinates": room_data.get('coord', {}),
-                "npcs": room_data.get('npcs', [])
+                "name": room_data.get("name"),
+                "description": room_data.get("desc", ""),
+                "exits": room_data.get("exits", {}),
+                "area": room_data.get("zone", "Unknown"),
+                "coordinates": room_data.get("coord", {}),
+                "npcs": room_data.get("npcs", []),
             }
 
             # Convert NPC names to the format expected by add_entity
-            if room_data.get('npcs'):
-                entity_data['npcs'] = [{"name": name} for name in room_data['npcs']]
+            if room_data.get("npcs"):
+                entity_data["npcs"] = [{"name": name} for name in room_data["npcs"]]
 
             # If an NPC was manually added, add it to the room's NPC list
             if npc_name:
-                if 'npcs' not in entity_data:
-                    entity_data['npcs'] = []
+                if "npcs" not in entity_data:
+                    entity_data["npcs"] = []
                 # Check if npc is already in the list by name
-                if not any(npc.get('name') == npc_name for npc in entity_data['npcs']):
-                    entity_data['npcs'].append({"name": npc_name})
-                    command_log.write(f"[bold yellow]Added '{npc_name}' to current room NPCs[/bold yellow]")
+                if not any(npc.get("name") == npc_name for npc in entity_data["npcs"]):
+                    entity_data["npcs"].append({"name": npc_name})
+                    command_log.write(
+                        f"[bold yellow]Added '{npc_name}' to current room NPCs[/bold yellow]"
+                    )
 
             # Update the knowledge graph
             entity = await self.agent.knowledge_graph.add_entity(entity_data)
 
             if entity:
-                response = await self.agent.send_command('exits')
+                response = await self.agent.send_command("exits")
                 if response:
-                    command_log.write("[bold green]Picked up exits response[/bold green]")
+                    command_log.write(
+                        "[bold green]Picked up exits response[/bold green]"
+                    )
                     command_log.write(f"[bold green]{response}[/bold green]")
                     await self.agent.room_manager.update_exits_from_command(response)
-                command_log.write("[bold green]Room data updated successfully in knowledge graph[/bold green]")
+                command_log.write(
+                    "[bold green]Room data updated successfully in knowledge graph[/bold green]"
+                )
             else:
                 command_log.write("[bold red]Room data error updating.[/bold red]")
 
         except Exception as e:
             command_log.write(f"[bold red]Error updating room data: {e}[/bold red]")
-            self.logger.error(f"Error in handle_update_room_command: {e}", exc_info=True)
+            self.logger.error(
+                f"Error in handle_update_room_command: {e}", exc_info=True
+            )
 
     async def handle_explore_area(self):
         """Handle the /xa command to toggle exploration of the current area."""
@@ -461,9 +489,13 @@ class CommandProcessor:
             if self.exploration_task and not self.exploration_task.done():
                 self.exploration_task.cancel()
                 self.exploring = False
-                command_log.write("[bold yellow]Area exploration stopping...[/bold yellow]")
+                command_log.write(
+                    "[bold yellow]Area exploration stopping...[/bold yellow]"
+                )
             else:
-                command_log.write("[bold yellow]Exploration was not running.[/bold yellow]")
+                command_log.write(
+                    "[bold yellow]Exploration was not running.[/bold yellow]"
+                )
         else:
             # If exploration is not running, start it
             self.exploring = True
@@ -484,7 +516,9 @@ class CommandProcessor:
                 self.exploring = False
                 return
 
-            start_room = await self.agent.knowledge_graph.get_room_by_number(start_room_num)
+            start_room = await self.agent.knowledge_graph.get_room_by_number(
+                start_room_num
+            )
             if not start_room or not start_room.zone:
                 command_log.write(
                     "[bold red]Error: Current area is unknown. Cannot start exploration.[/bold red]"
@@ -499,16 +533,24 @@ class CommandProcessor:
 
             while self.exploring:
                 # Find a room at the edge of the explored area with unexplored exits
-                edge_room = self.agent.knowledge_graph.get_room_with_unexplored_exits(target_area, visited_rooms)
+                edge_room = self.agent.knowledge_graph.get_room_with_unexplored_exits(
+                    target_area, visited_rooms
+                )
 
                 if not edge_room:
-                    command_log.write("[bold green]No more unexplored rooms found in the area.[/bold green]")
+                    command_log.write(
+                        "[bold green]No more unexplored rooms found in the area.[/bold green]"
+                    )
                     break
 
                 # Navigate to the edge room
                 if self.state_manager.room_num != edge_room.room_number:
-                    path_info = await self.agent.knowledge_graph.find_path_between_rooms(
-                        self.state_manager.room_num, edge_room.room_number, max_depth=250
+                    path_info = (
+                        await self.agent.knowledge_graph.find_path_between_rooms(
+                            self.state_manager.room_num,
+                            edge_room.room_number,
+                            max_depth=250,
+                        )
                     )
                     if not path_info or not path_info.get("path"):
                         command_log.write(
@@ -521,7 +563,9 @@ class CommandProcessor:
                     command_log.write(f"Moving to edge room: {edge_room.room_number}")
                     run_command_str = self._compress_path(path_commands)
                     await self.agent.send_command(run_command_str)
-                    await asyncio.sleep(random.uniform(0.7, 1.3) * len(run_command_str.split(";")))
+                    await asyncio.sleep(
+                        random.uniform(0.7, 1.3) * len(run_command_str.split(";"))
+                    )
 
                 # Explore the branch starting from the edge room
                 await self._explore_branch(edge_room, target_area, visited_rooms)
@@ -531,7 +575,9 @@ class CommandProcessor:
         except asyncio.CancelledError:
             command_log.write("[bold yellow]Exploration task cancelled.[/bold yellow]")
         except Exception as e:
-            command_log.write(f"[bold red]An error occurred during exploration: {e}[/bold red]")
+            command_log.write(
+                f"[bold red]An error occurred during exploration: {e}[/bold red]"
+            )
             self.logger.error(f"Error in exploration loop: {e}", exc_info=True)
         finally:
             self.exploring = False
@@ -562,21 +608,31 @@ class CommandProcessor:
                     )
                     continue
                 path_commands = path_info["path"]
-                command_log.write(f"Exploring branch, moving to room: {current_room.room_number}")
+                command_log.write(
+                    f"Exploring branch, moving to room: {current_room.room_number}"
+                )
                 run_command_str = self._compress_path(path_commands)
                 if len(run_command_str) > 1:
                     await self.agent.send_command(run_command_str)
                 else:
                     await self.agent.send_command(run_command_str)
-                await asyncio.sleep(random.uniform(0.7, 1.3) * len(run_command_str.split(";")))
+                await asyncio.sleep(
+                    random.uniform(0.7, 1.3) * len(run_command_str.split(";"))
+                )
 
             # Explore exits of the current room
             await self.handle_update_room_command()
-            current_room_node = await self.agent.knowledge_graph.get_room_by_number(self.state_manager.room_num)
+            current_room_node = await self.agent.knowledge_graph.get_room_by_number(
+                self.state_manager.room_num
+            )
             if not current_room_node:
                 continue
 
-            exits = {exit.direction: exit for exit in current_room_node.exits if exit.to_room is None}
+            exits = {
+                exit.direction: exit
+                for exit in current_room_node.exits
+                if exit.to_room is None
+            }
 
             for direction, exit_info in exits.items():
                 if not self.exploring:
@@ -591,23 +647,33 @@ class CommandProcessor:
 
                 # Handle closed doors
                 if self.state_manager.room_num == room_num_before_move:
-                    command_log.write(f"Found a door at {direction}. Attempting to open.")
+                    command_log.write(
+                        f"Found a door at {direction}. Attempting to open."
+                    )
                     await self.agent.send_command(f"open {direction}")
                     await asyncio.sleep(random.uniform(0.7, 1.3))
                     await self.agent.send_command(direction)
                     await asyncio.sleep(random.uniform(0.7, 1.3))
 
                 if self.state_manager.room_num != room_num_before_move:
-                    command_log.write(f"[green]Moved {direction} to room {self.state_manager.room_num}.[/green]")
+                    command_log.write(
+                        f"[green]Moved {direction} to room {self.state_manager.room_num}.[/green]"
+                    )
                     await self.handle_update_room_command()
                     new_room_num = self.state_manager.room_num
                     new_room_data = self.agent.aardwolf_gmcp.get_room_info()
-                    if new_room_data.get('zone') == target_area:
-                        new_room_node = await self.agent.knowledge_graph.get_room_by_number(new_room_num)
+                    if new_room_data.get("zone") == target_area:
+                        new_room_node = (
+                            await self.agent.knowledge_graph.get_room_by_number(
+                                new_room_num
+                            )
+                        )
                         if new_room_node and new_room_num not in visited_rooms:
                             queue.append(new_room_node)
                     else:
-                        command_log.write(f"[yellow]Room {new_room_num} is in a different area. Not adding to branch queue.[/yellow]")
+                        command_log.write(
+                            f"[yellow]Room {new_room_num} is in a different area. Not adding to branch queue.[/yellow]"
+                        )
 
                     # Go back to the previous room to continue exploring other exits
                     opposite_direction = self._get_opposite_direction(direction)
@@ -615,17 +681,25 @@ class CommandProcessor:
                         await self.agent.send_command(opposite_direction)
                         await asyncio.sleep(random.uniform(0.7, 1.3))
                 else:
-                    command_log.write(f"[yellow]Could not move {direction}. It might be a locked door.[/yellow]")
+                    command_log.write(
+                        f"[yellow]Could not move {direction}. It might be a locked door.[/yellow]"
+                    )
 
     def _get_opposite_direction(self, direction: str) -> str | None:
         """Get the opposite direction for a given cardinal direction."""
         opposites = {
-            "n": "s", "s": "n", "e": "w", "w": "e",
-            "u": "d", "d": "u", "ne": "sw", "sw": "ne",
-            "nw": "se", "se": "nw"
+            "n": "s",
+            "s": "n",
+            "e": "w",
+            "w": "e",
+            "u": "d",
+            "d": "u",
+            "ne": "sw",
+            "sw": "ne",
+            "nw": "se",
+            "se": "nw",
         }
         return opposites.get(direction.lower())
-
 
     async def handle_scan_command(self) -> None:
         """Handle the /scan command."""
@@ -633,7 +707,9 @@ class CommandProcessor:
             command_log = self.app.query_one("#command-log", CommandLog)
             response = await self.agent.send_command("scan here")
 
-            command_log.write(f"[bold cyan]Scan command done with: [/bold cyan]{response}")
+            command_log.write(
+                f"[bold cyan]Scan command done with: [/bold cyan]{response}"
+            )
 
             # Parse the response to extract NPC names
             npc_set = set()
@@ -650,19 +726,25 @@ class CommandProcessor:
             npcs = list(npc_set)
 
             if len(npcs) == 0:
-                command_log.write("[bold cyan]No NPCs found in scan response.[/bold cyan]")
+                command_log.write(
+                    "[bold cyan]No NPCs found in scan response.[/bold cyan]"
+                )
                 return
 
             # Get the current room information
             room_num = self.agent.state_manager.room_num
             if not room_num:
-                command_log.write("[bold red]Cannot update NPCs: Current room number is unknown.[/bold red]")
+                command_log.write(
+                    "[bold red]Cannot update NPCs: Current room number is unknown.[/bold red]"
+                )
                 return
 
             # Get existing room data from the state manager
             room_data = self.agent.state_manager.get_current_room_data()
             if not room_data:
-                command_log.write("[bold red]Cannot update NPCs: Failed to get current room data.[/bold red]")
+                command_log.write(
+                    "[bold red]Cannot update NPCs: Failed to get current room data.[/bold red]"
+                )
                 return
 
             # Add the scanned NPCs to the room data
@@ -673,13 +755,19 @@ class CommandProcessor:
             # Update the knowledge graph
             entity = await self.agent.knowledge_graph.add_entity(room_data)
             if entity:
-                command_log.write(f"[bold green]Updated room {room_num} with {len(npcs)} NPCs from scan: [/bold green]{', '.join(npcs)}")
+                command_log.write(
+                    f"[bold green]Updated room {room_num} with {len(npcs)} NPCs from scan: [/bold green]{', '.join(npcs)}"
+                )
             else:
-                command_log.write(f"[bold red]Scan room update failed: [/bold red]{room_data}")
+                command_log.write(
+                    f"[bold red]Scan room update failed: [/bold red]{room_data}"
+                )
 
         except Exception as e:
-            command_log.write(f"[bold red]Error capturing NPCs via scan: [/bold red]{e}", exc_info=True)
-
+            command_log.write(
+                f"[bold red]Error capturing NPCs via scan: [/bold red]{e}",
+                exc_info=True,
+            )
 
     async def handle_atk(self, mob: str) -> None:
         """Handle the /atk command."""
@@ -689,31 +777,63 @@ class CommandProcessor:
             for i, skill in enumerate(skills):
                 if i == 0:
                     await self.agent.send_command(f"{skill} {mob}")
-                    command_log.write(f"[bold cyan]Attack command done with: [/bold cyan]{skill} {mob}")
+                    command_log.write(
+                        f"[bold cyan]Attack command done with: [/bold cyan]{skill} {mob}"
+                    )
                 else:
                     await self.agent.send_command(skill)
-                    command_log.write(f"[bold cyan]Attack command done with: [/bold cyan]{skill}")
+                    command_log.write(
+                        f"[bold cyan]Attack command done with: [/bold cyan]{skill}"
+                    )
         except Exception as e:
-            command_log.write(f"[bold red]Error attacking mob: [/bold red]{e}", exc_info=True)
-
+            command_log.write(
+                f"[bold red]Error attacking mob: [/bold red]{e}", exc_info=True
+            )
 
     async def show_internal_commands_help(self) -> None:
         """Show help for available internal commands."""
         command_log = self.app.query_one("#command-log", CommandLog)
         command_log.write("[bold cyan]Available Internal Commands:[/bold cyan]")
-        command_log.write("[bold white]/sw <area>[/bold white] - Find speedwalk to area and pre-fill input")
-        command_log.write("[bold white]/mh <mob>[/bold white] - Find mob and pre-fill input with direction to mob")
-        command_log.write("[bold white]/rf <room_name>[/bold white] - Find direction and walk to specific room")
+        command_log.write(
+            "[bold white]/sw <area>[/bold white] - Find speedwalk to area and pre-fill input"
+        )
+        command_log.write(
+            "[bold white]/mh <mob>[/bold white] - Find mob and pre-fill input with direction to mob"
+        )
+        command_log.write(
+            "[bold white]/rf <room_name>[/bold white] - Find direction and walk to specific room"
+        )
         command_log.write("[bold white]/atk <mob>[/bold white] - Attack mob")
-        command_log.write("[bold white]/auto <context>|off[/bold white] - Enable/disable automation with context")
-        command_log.write("[bold white]/ur [npc_name][/bold white] - Update knowledge graph with current room and mob data")
-        command_log.write("[bold white]/scan[/bold white] - Scan current room for NPCs and update knowledge graph")
-        command_log.write("[bold white]/filter[/bold white] - Show current log filtering status")
-        command_log.write("[bold white]/filter level <ERROR|WARNING|INFO|DEBUG>[/bold white] - Set minimum log level")
-        command_log.write("[bold white]/filter debug <on|off>[/bold white] - Enable/disable debug message filtering")
-        command_log.write("[bold white]/filter add <pattern>[/bold white] - Add custom debug filter pattern")
-        command_log.write("[bold white]/filter remove <pattern>[/bold white] - Remove custom debug filter pattern")
-        command_log.write("[bold white]/help or /?[/bold white] - Show this help message")
+        command_log.write(
+            "[bold white]/ac[/bold white] - Toggle automatic buff management (spellup on expiry)"
+        )
+        command_log.write(
+            "[bold white]/auto <context>|off[/bold white] - Enable/disable automation with context"
+        )
+        command_log.write(
+            "[bold white]/ur [npc_name][/bold white] - Update knowledge graph with current room and mob data"
+        )
+        command_log.write(
+            "[bold white]/scan[/bold white] - Scan current room for NPCs and update knowledge graph"
+        )
+        command_log.write(
+            "[bold white]/filter[/bold white] - Show current log filtering status"
+        )
+        command_log.write(
+            "[bold white]/filter level <ERROR|WARNING|INFO|DEBUG>[/bold white] - Set minimum log level"
+        )
+        command_log.write(
+            "[bold white]/filter debug <on|off>[/bold white] - Enable/disable debug message filtering"
+        )
+        command_log.write(
+            "[bold white]/filter add <pattern>[/bold white] - Add custom debug filter pattern"
+        )
+        command_log.write(
+            "[bold white]/filter remove <pattern>[/bold white] - Remove custom debug filter pattern"
+        )
+        command_log.write(
+            "[bold white]/help or /?[/bold white] - Show this help message"
+        )
         command_log.write("[dim]Note: All internal commands start with '/'[/dim]")
 
     def prefill_command_input(self, text: str) -> None:
@@ -722,6 +842,7 @@ class CommandProcessor:
         Args:
             text: The text to pre-fill
         """
+
         def do_prefill() -> None:
             try:
                 command_input = self.app.query_one("#command-input", CommandInput)
@@ -736,8 +857,6 @@ class CommandProcessor:
             self.app.call_later(do_prefill)
         except Exception as e:
             logger.error(f"Error scheduling pre-fill: {e}", exc_info=True)
-
-
 
     async def _reconnect(self) -> None:
         """Reconnect to the server."""
@@ -797,7 +916,9 @@ class CommandProcessor:
             # Store the last response for map extraction
             if not hasattr(self.agent, "last_response"):
                 self.agent.last_response = response
-                logger.debug(f"Added last_response attribute to agent, length: {len(response)}")
+                logger.debug(
+                    f"Added last_response attribute to agent, length: {len(response)}"
+                )
             else:
                 self.agent.last_response = response
                 logger.debug(f"Updated agent.last_response, length: {len(response)}")
@@ -806,10 +927,12 @@ class CommandProcessor:
             if hasattr(self.agent, "aardwolf_gmcp"):
                 updates = self.agent.aardwolf_gmcp.update_from_gmcp()
                 if updates:
-                    logger.debug(f"GMCP updates after command: {', '.join(updates.keys())}")
+                    logger.debug(
+                        f"GMCP updates after command: {', '.join(updates.keys())}"
+                    )
 
                     # Force an immediate update of the widgets (with throttling)
-                    if not getattr(self.app, '_updating_widgets', False):
+                    if not getattr(self.app, "_updating_widgets", False):
                         asyncio.create_task(self.app._update_widgets_manually())
 
         except Exception as e:
@@ -833,11 +956,15 @@ class CommandProcessor:
         # Check for "show all" command - GMCP data is received automatically
         if command.lower() == "show all":
             logger.info("Executing special 'show all' command - GMCP data is automatic")
-            command_log.write("[dim]GMCP data is received automatically from server...[/dim]")
+            command_log.write(
+                "[dim]GMCP data is received automatically from server...[/dim]"
+            )
 
             # GMCP data is sent automatically by the server
             if hasattr(self.agent, "aardwolf_gmcp"):
-                command_log.write("[bold green]GMCP data is received automatically[/bold green]")
+                command_log.write(
+                    "[bold green]GMCP data is received automatically[/bold green]"
+                )
                 await asyncio.sleep(0.5)
 
                 # Wait a moment for the data to be processed
@@ -845,7 +972,9 @@ class CommandProcessor:
 
                 # Update the widgets
                 await self.app.update_reactive_widgets()
-                command_log.write("[bold green]Widgets updated with GMCP data[/bold green]")
+                command_log.write(
+                    "[bold green]Widgets updated with GMCP data[/bold green]"
+                )
             return True
 
         # Check for "debug gmcp" command to show raw GMCP data
@@ -878,10 +1007,12 @@ class CommandProcessor:
 
                 # Force a GMCP update
                 updates = self.agent.aardwolf_gmcp.update_from_gmcp()
-                command_log.write(f"[bold]GMCP Updates:[/bold] {', '.join(updates.keys()) if updates else 'None'}")
+                command_log.write(
+                    f"[bold]GMCP Updates:[/bold] {', '.join(updates.keys()) if updates else 'None'}"
+                )
 
                 # Force an immediate update of the widgets (with throttling)
-                if not getattr(self.app, '_updating_widgets', False):
+                if not getattr(self.app, "_updating_widgets", False):
                     asyncio.create_task(self.app._update_widgets_manually())
             else:
                 command_log.write("[bold red]GMCP not available[/bold red]")
@@ -889,7 +1020,9 @@ class CommandProcessor:
 
         # Check for "update stats" command to force a stats update
         if command.lower() == "update stats":
-            logger.info("Executing special 'update stats' command to force a stats update")
+            logger.info(
+                "Executing special 'update stats' command to force a stats update"
+            )
             command_log.write("[bold]Forcing stats update via GMCP...[/bold]")
 
             # GMCP data is received automatically, just force widget update
@@ -900,7 +1033,9 @@ class CommandProcessor:
             # Force a GMCP update
             if hasattr(self.agent, "aardwolf_gmcp"):
                 updates = self.agent.aardwolf_gmcp.update_from_gmcp()
-                command_log.write(f"[dim]GMCP updates: {', '.join(updates.keys()) if updates else 'None'}[/dim]")
+                command_log.write(
+                    f"[dim]GMCP updates: {', '.join(updates.keys()) if updates else 'None'}[/dim]"
+                )
 
                 # Get the character data
                 char_data = self.agent.aardwolf_gmcp.get_character_data()
@@ -926,7 +1061,7 @@ class CommandProcessor:
 
         try:
             # Get the command log handler from the app
-            handler = getattr(self.app, 'log_handler', None)
+            handler = getattr(self.app, "log_handler", None)
             if not handler:
                 command_log.write("[bold red]Command log handler not found[/bold red]")
                 return
@@ -941,43 +1076,63 @@ class CommandProcessor:
             if subcommand == "level" and len(parts) == 2:
                 level_name = parts[1].upper()
                 level_map = {
-                    'DEBUG': logging.DEBUG,
-                    'INFO': logging.INFO,
-                    'WARNING': logging.WARNING,
-                    'ERROR': logging.ERROR,
-                    'CRITICAL': logging.CRITICAL
+                    "DEBUG": logging.DEBUG,
+                    "INFO": logging.INFO,
+                    "WARNING": logging.WARNING,
+                    "ERROR": logging.ERROR,
+                    "CRITICAL": logging.CRITICAL,
                 }
 
                 if level_name in level_map:
                     handler.configure_filtering(min_level=level_map[level_name])
-                    command_log.write(f"[bold green]Log level set to {level_name}[/bold green]")
+                    command_log.write(
+                        f"[bold green]Log level set to {level_name}[/bold green]"
+                    )
                 else:
-                    command_log.write(f"[bold red]Invalid log level: {level_name}[/bold red]")
-                    command_log.write("[bold cyan]Valid levels: DEBUG, INFO, WARNING, ERROR, CRITICAL[/bold cyan]")
+                    command_log.write(
+                        f"[bold red]Invalid log level: {level_name}[/bold red]"
+                    )
+                    command_log.write(
+                        "[bold cyan]Valid levels: DEBUG, INFO, WARNING, ERROR, CRITICAL[/bold cyan]"
+                    )
 
             elif subcommand == "debug" and len(parts) == 2:
                 setting = parts[1].lower()
-                if setting in ['on', 'true', 'yes', '1']:
+                if setting in ["on", "true", "yes", "1"]:
                     handler.configure_filtering(filter_debug=True)
-                    command_log.write("[bold green]Debug filtering enabled[/bold green]")
-                elif setting in ['off', 'false', 'no', '0']:
+                    command_log.write(
+                        "[bold green]Debug filtering enabled[/bold green]"
+                    )
+                elif setting in ["off", "false", "no", "0"]:
                     handler.configure_filtering(filter_debug=False)
-                    command_log.write("[bold green]Debug filtering disabled[/bold green]")
+                    command_log.write(
+                        "[bold green]Debug filtering disabled[/bold green]"
+                    )
                 else:
-                    command_log.write(f"[bold red]Invalid setting: {setting}[/bold red]")
-                    command_log.write("[bold cyan]Use: on/off, true/false, yes/no, 1/0[/bold cyan]")
+                    command_log.write(
+                        f"[bold red]Invalid setting: {setting}[/bold red]"
+                    )
+                    command_log.write(
+                        "[bold cyan]Use: on/off, true/false, yes/no, 1/0[/bold cyan]"
+                    )
 
             elif subcommand == "add" and len(parts) >= 2:
                 pattern = " ".join(parts[1:])
                 handler.add_debug_pattern(pattern)
-                command_log.write(f"[bold green]Added debug filter pattern: {pattern}[/bold green]")
+                command_log.write(
+                    f"[bold green]Added debug filter pattern: {pattern}[/bold green]"
+                )
 
             elif subcommand == "remove" and len(parts) >= 2:
                 pattern = " ".join(parts[1:])
                 if handler.remove_debug_pattern(pattern):
-                    command_log.write(f"[bold green]Removed debug filter pattern: {pattern}[/bold green]")
+                    command_log.write(
+                        f"[bold green]Removed debug filter pattern: {pattern}[/bold green]"
+                    )
                 else:
-                    command_log.write(f"[bold yellow]Pattern not found: {pattern}[/bold yellow]")
+                    command_log.write(
+                        f"[bold yellow]Pattern not found: {pattern}[/bold yellow]"
+                    )
 
             else:
                 command_log.write("[bold red]Invalid filter command[/bold red]")
@@ -989,14 +1144,16 @@ class CommandProcessor:
 
         except Exception as e:
             logger.error(f"Error handling filter command: {e}", exc_info=True)
-            command_log.write(f"[bold red]Error executing filter command: {e}[/bold red]")
+            command_log.write(
+                f"[bold red]Error executing filter command: {e}[/bold red]"
+            )
 
     async def show_filter_status(self) -> None:
         """Show current filter status."""
         command_log = self.app.query_one("#command-log", CommandLog)
 
         try:
-            handler = getattr(self.app, 'log_handler', None)
+            handler = getattr(self.app, "log_handler", None)
             if not handler:
                 command_log.write("[bold red]Command log handler not found[/bold red]")
                 return
@@ -1004,12 +1161,16 @@ class CommandProcessor:
             status = handler.get_filter_status()
 
             command_log.write("[bold cyan]Current Log Filter Status:[/bold cyan]")
-            command_log.write(f"  Minimum Level: [bold white]{status['min_level']}[/bold white]")
-            command_log.write(f"  Debug Filtering: [bold white]{'Enabled' if status['filter_debug'] else 'Disabled'}[/bold white]")
+            command_log.write(
+                f"  Minimum Level: [bold white]{status['min_level']}[/bold white]"
+            )
+            command_log.write(
+                f"  Debug Filtering: [bold white]{'Enabled' if status['filter_debug'] else 'Disabled'}[/bold white]"
+            )
 
-            if status['custom_patterns']:
+            if status["custom_patterns"]:
                 command_log.write("  Custom Debug Patterns:")
-                for pattern in status['custom_patterns']:
+                for pattern in status["custom_patterns"]:
                     command_log.write(f"    - [dim]{pattern}[/dim]")
             else:
                 command_log.write("  Custom Debug Patterns: [dim]None[/dim]")
