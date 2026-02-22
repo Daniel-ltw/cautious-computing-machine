@@ -10,8 +10,6 @@ import logging
 import threading
 from typing import Any
 
-from ...db.models import Room
-
 logger = logging.getLogger(__name__)
 
 
@@ -403,17 +401,6 @@ class GMCPManager:
                 self.state_manager.room_terrain = data["sector"]
 
             self.state_manager.exits = data.get("exits", {})
-
-            # Persist to database
-            db_room_data = {
-                "room_number": data.get("num"),
-                "name": data.get("name", "Unknown"),
-                "zone": data.get("zone", "Unknown"),
-                "terrain": data.get("terrain", "Unknown"),
-                "exits": data.get("exits", {}),
-                "coord": data.get("coord", {}),
-            }
-            Room.create_or_update_from_dict(db_room_data)
 
             if "coord" in data:
                 self.state_manager.room_coords = data["coord"]

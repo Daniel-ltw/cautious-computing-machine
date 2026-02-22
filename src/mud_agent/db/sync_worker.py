@@ -136,6 +136,9 @@ class SyncWorker:
             self.pull()
             self.pull_deletes()
 
+    # Maximum number of IDs to mark as synced in a single UPDATE statement
+    PUSH_BATCH_SIZE = 50
+
     def push(self) -> None:
         """Push all dirty local records to the remote database."""
         for local_model in PUSH_ORDER:
@@ -162,13 +165,20 @@ class SyncWorker:
                     self.logger.error(
                         f"Failed to push {local_model.__name__} id={record.id}: {e}"
                     )
+                # Yield the SQLite write lock briefly between records
+                time.sleep(0.01)
 
-            # Batch-mark all successfully pushed records as synced in one write
-            if pushed_ids:
+            # Mark pushed records as synced in small batches to keep
+            # write locks short and let the main thread interleave.
+            now = datetime.now(timezone.utc)
+            for i in range(0, len(pushed_ids), self.PUSH_BATCH_SIZE):
+                batch = pushed_ids[i : i + self.PUSH_BATCH_SIZE]
                 local_model.update(
                     sync_status="synced",
-                    remote_updated_at=datetime.now(timezone.utc),
-                ).where(local_model.id.in_(pushed_ids)).execute()
+                    remote_updated_at=now,
+                ).where(local_model.id.in_(batch)).execute()
+                if i + self.PUSH_BATCH_SIZE < len(pushed_ids):
+                    time.sleep(0.01)
 
     def _push_record(self, record, local_model, remote_model) -> None:
         """Push a single local record to the remote database.
@@ -626,11 +636,14 @@ class SyncWorker:
                     f"Failed to push delete {record.table_name_field}: {e}"
                 )
 
-        # Batch-mark all successfully pushed deletes as synced
-        if synced_ids:
+        # Mark pushed deletes as synced in small batches
+        for i in range(0, len(synced_ids), self.PUSH_BATCH_SIZE):
+            batch = synced_ids[i : i + self.PUSH_BATCH_SIZE]
             SyncDelete.update(synced=True).where(
-                SyncDelete.id.in_(synced_ids)
+                SyncDelete.id.in_(batch)
             ).execute()
+            if i + self.PUSH_BATCH_SIZE < len(synced_ids):
+                time.sleep(0.01)
 
     def pull_deletes(self) -> None:
         """Pull delete records from remote and apply locally."""
