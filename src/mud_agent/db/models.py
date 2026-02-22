@@ -156,20 +156,18 @@ class Room(BaseModel):
             logger.error("Failed to create or update room: 'name' is missing.")
             return None
 
+        # Transaction 1: upsert the room itself (short write lock)
         with db.atomic():
-            # Create or update the associated Entity using the room number as the name
             entity, _ = Entity.get_or_create(
                 name=str(room_number),
                 defaults={"entity_type": "Room"}
             )
 
-            # Use get_or_create for a cleaner approach
             room, created = cls.get_or_create(
                 entity=entity,
                 room_number=int(room_number),
             )
 
-            # Prepare room data for creation or update
             room_data = {
                 "terrain": data.get("terrain", room.terrain),
                 "zone": data.get("zone", room.zone or "unknown"),
@@ -182,23 +180,22 @@ class Room(BaseModel):
             }
 
             if not created:
-                # The room already existed, so we update it with new data.
-                # We filter out None values to avoid overwriting existing data with nothing.
                 for key, value in room_data.items():
                     if value is not None:
                         setattr(room, key, value)
-                room.save()  # This will also update the 'updated_at' timestamp.
+                room.save()
 
-            # Handle exits
-            exits = data.get("exits")
-            logger.debug(f"Processing exits for room {room_number}: {exits}")
-            if exits:
-                for direction, exit_info in exits.items():
+        # Transaction 2+: upsert each exit individually so the write lock
+        # is held only briefly per exit rather than across all of them.
+        exits = data.get("exits")
+        logger.debug(f"Processing exits for room {room_number}: {exits}")
+        if exits:
+            for direction, exit_info in exits.items():
+                with db.atomic():
                     is_door = isinstance(exit_info, dict)
                     to_room_num = exit_info.get("num") if is_door else exit_info
 
-                    # Use get_or_create for the exit
-                    exit_instance, created = RoomExit.get_or_create(
+                    exit_instance, exit_created = RoomExit.get_or_create(
                         from_room=room,
                         to_room_number=to_room_num,
                         defaults={
@@ -208,8 +205,7 @@ class Room(BaseModel):
                         }
                     )
 
-                    if not created:
-                        # Update existing exit if necessary
+                    if not exit_created:
                         if exit_instance.direction != direction:
                             exit_instance.direction = direction
                         if exit_instance.is_door != is_door:
@@ -218,7 +214,6 @@ class Room(BaseModel):
                             exit_instance.door_is_closed = exit_info.get("state") == "closed"
                         exit_instance.save()
 
-                    # Link to_room if the target room exists
                     if to_room_num is not None:
                         try:
                             target_room = Room.select().where(Room.room_number == int(to_room_num)).get()
@@ -226,10 +221,9 @@ class Room(BaseModel):
                                 exit_instance.to_room = target_room
                                 exit_instance.save()
                         except DoesNotExist:
-                            # Target room not yet created; will remain NULL until known
                             pass
 
-            return room
+        return room
 
     def to_info(self):
         exits = {exit.direction.lower(): exit.to_room_number for exit in self.exits}
@@ -548,25 +542,16 @@ def close_database():
         logger.debug("Database connection closed")
 
 
-# Context manager for database operations
-class DatabaseContext:
-    """Context manager for database operations."""
-
-    def __enter__(self):
-        if db.is_closed():
-            db.connect()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if not db.is_closed():
-            db.close()
+# Backward-compatible alias — use db.connection_context() instead, which
+# reuses an already-open connection and only closes it if *it* opened one.
+DatabaseContext = db.connection_context
 
 
 # Utility functions for common queries
 def get_room_by_number(room_number: int) -> Room | None:
     """Get a room by its room number."""
     try:
-        with DatabaseContext():
+        with db.connection_context():
             return Room.select().join(Entity).where(Room.room_number == room_number).get()
     except DoesNotExist:
         return None
@@ -578,7 +563,7 @@ def get_room_by_number(room_number: int) -> Room | None:
 def get_entity_by_name(name: str, entity_type: str = None) -> Entity | None:
     """Get an entity by name and optionally by type."""
     try:
-        with DatabaseContext():
+        with db.connection_context():
             query = Entity.select().where(Entity.name == name)
             if entity_type:
                 query = query.where(Entity.entity_type == entity_type)
@@ -593,7 +578,7 @@ def get_entity_by_name(name: str, entity_type: str = None) -> Entity | None:
 def get_room_exits(room_number: int) -> list[RoomExit]:
     """Get all exits for a room."""
     try:
-        with DatabaseContext():
+        with db.connection_context():
             room = get_room_by_number(room_number)
             if not room:
                 return []
@@ -615,7 +600,7 @@ def find_path_between_rooms(from_room: int, to_room_number: int, max_depth: int 
         A list of directions to take from from_room to reach to_room.
     """
     try:
-        with DatabaseContext():
+        with db.connection_context():
             # Simple BFS implementation
             from collections import deque
 
