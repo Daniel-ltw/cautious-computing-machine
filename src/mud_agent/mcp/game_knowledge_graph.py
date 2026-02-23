@@ -45,12 +45,18 @@ class GameKnowledgeGraph:
         """Run a database function in a thread to avoid blocking the event loop.
 
         Uses asyncio.to_thread so SQLite operations don't block async tasks.
+        Each invocation opens and closes its own connection via connection_context()
+        to avoid leaking thread-local connections in the thread pool.
         Retries with backoff if the database is locked by the SyncWorker thread.
         """
+        def _with_connection():
+            with db.connection_context():
+                return func(*args, **kwargs)
+
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                return await asyncio.to_thread(func, *args, **kwargs)
+                return await asyncio.to_thread(_with_connection)
             except OperationalError as e:
                 if "locked" in str(e) and attempt < max_retries - 1:
                     self.logger.warning(

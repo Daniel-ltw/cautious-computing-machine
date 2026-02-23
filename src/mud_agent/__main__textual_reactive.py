@@ -167,6 +167,12 @@ async def main() -> int:
                 except Exception as e:
                     logger.error(f"Error stopping sync worker: {e}")
 
+            # 10. Close the local SQLite database connection
+            try:
+                await agent.knowledge_graph.cleanup()
+            except Exception as e:
+                logger.error(f"Error closing database: {e}")
+
             logger.info("Shutdown complete.")
 
         return 0
