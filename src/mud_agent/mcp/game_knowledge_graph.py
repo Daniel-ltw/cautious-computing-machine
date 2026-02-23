@@ -447,16 +447,16 @@ class GameKnowledgeGraph:
             return
 
         try:
-            # Transaction 1: Look up rooms (short read, may create to_room)
-            with db.atomic():
-                from_room = Room.get_or_none(Room.room_number == from_room_num)
-                if not from_room:
-                    self.logger.warning(f"Room {from_room_num} not found. Cannot record exit.")
-                    return
+            # Read rooms (no write lock needed for lookups)
+            from_room = Room.get_or_none(Room.room_number == from_room_num)
+            if not from_room:
+                self.logger.warning(f"Room {from_room_num} not found. Cannot record exit.")
+                return
 
-                to_room = Room.get_or_none(Room.room_number == to_room_num)
-                if not to_room:
-                    # If the destination room doesn't exist, create it
+            to_room = Room.get_or_none(Room.room_number == to_room_num)
+            if not to_room:
+                # Create destination room if it doesn't exist (short write)
+                with db.atomic():
                     to_room_entity, _ = Entity.get_or_create(
                         name=str(to_room_num), defaults={"entity_type": "Room"}
                     )
@@ -480,40 +480,36 @@ class GameKnowledgeGraph:
             else:
                 dir_key = mapping.get(dir_in, dir_in)
 
-            # Transaction 2: Read exits and find matching one (short read)
+            # Read exits and find matching one (no write lock needed)
             exit_obj = None
-            with db.atomic():
-                for ex in from_room.exits:
-                    stored = (ex.direction or "").strip().lower()
-                    if stored.startswith("say "):
-                        stored_norm = "say"
-                    elif stored.startswith("enter "):
-                        stored_norm = "enter"
-                    elif stored.startswith("board"):
-                        stored_norm = "board"
-                    elif stored.startswith("escape"):
-                        stored_norm = "escape"
-                    else:
-                        stored_norm = mapping.get(stored, stored)
+            for ex in from_room.exits:
+                stored = (ex.direction or "").strip().lower()
+                if stored.startswith("say "):
+                    stored_norm = "say"
+                elif stored.startswith("enter "):
+                    stored_norm = "enter"
+                elif stored.startswith("board"):
+                    stored_norm = "board"
+                elif stored.startswith("escape"):
+                    stored_norm = "escape"
+                else:
+                    stored_norm = mapping.get(stored, stored)
 
-                    # Direct match on stored direction name
-                    if stored == dir_in:
-                         exit_obj = ex
-                         break
+                # Direct match on stored direction name
+                if stored == dir_in:
+                    exit_obj = ex
+                    break
 
-                    # Also match if the normalized directions are identical AND the stored direction
-                    # is NOT a generic verb like 'enter' that might be used for multiple exits.
-                    # e.g. 'n' vs 'north' is fine to match.
-                    # 'enter hut' vs 'enter rubble' -> both norm to 'enter' -> should NOT match.
-                    if stored_norm == dir_key and stored_norm not in ["enter", "board", "escape", "say"]:
-                        exit_obj = ex
-                        break
+                # Also match if the normalized directions are identical AND the stored direction
+                # is NOT a generic verb like 'enter' that might be used for multiple exits.
+                if stored_norm == dir_key and stored_norm not in ["enter", "board", "escape", "say"]:
+                    exit_obj = ex
+                    break
 
-                    # Check if the command contains the stored direction (e.g. "enter portal" matches "portal")
-                    # This handles cases where the exit is named "portal" but the command is "enter portal"
-                    if len(stored) > 2 and dir_in.endswith(stored):
-                         exit_obj = ex
-                         break
+                # Check if the command contains the stored direction (e.g. "enter portal" matches "portal")
+                if len(stored) > 2 and dir_in.endswith(stored):
+                    exit_obj = ex
+                    break
 
             self.logger.debug(
                 f"Recording exit success: {from_room_num} -> {to_room_num} ({direction} -> {dir_key})"
