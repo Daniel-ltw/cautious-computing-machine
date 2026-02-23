@@ -110,12 +110,25 @@ class SyncWorker:
         self.logger.info("SyncWorker stopped.")
 
     async def _sync_loop(self) -> None:
-        """Main sync loop: push then pull on each cycle."""
+        """Main sync loop.
+
+        First cycle: pull first (deletes then updates) so we don't push
+        stale data over newer remote state.
+        Subsequent cycles: push first so local changes propagate quickly,
+        then pull.
+        """
+        first_cycle = True
         try:
             while True:
                 try:
-                    await asyncio.to_thread(self._push_with_connection)
-                    await asyncio.to_thread(self._pull_with_connection)
+                    if first_cycle:
+                        self.logger.info("First sync cycle — pulling remote state first")
+                        await asyncio.to_thread(self._pull_with_connection)
+                        await asyncio.to_thread(self._push_with_connection)
+                        first_cycle = False
+                    else:
+                        await asyncio.to_thread(self._push_with_connection)
+                        await asyncio.to_thread(self._pull_with_connection)
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -133,8 +146,8 @@ class SyncWorker:
     def _pull_with_connection(self) -> None:
         """Pull with a dedicated local DB connection for thread safety."""
         with local_db.connection_context():
-            self.pull()
             self.pull_deletes()
+            self.pull()
 
     # Maximum number of IDs to mark as synced in a single UPDATE statement
     PUSH_BATCH_SIZE = 50
