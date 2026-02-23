@@ -49,9 +49,8 @@ class BaseModel(Model):
         database = db
 
     def save(self, *args, **kwargs):
-        """Override save to update the updated_at timestamp and mark as dirty."""
+        """Override save to update the updated_at timestamp."""
         self.updated_at = datetime.now()
-        self.sync_status = "dirty"
         return super().save(*args, **kwargs)
 
     def get_natural_key(self) -> dict | None:

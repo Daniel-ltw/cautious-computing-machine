@@ -1,6 +1,7 @@
 """SyncWorker: Background bidirectional sync between local SQLite and remote Supabase.
 
-Push: Finds all local records with sync_status='dirty', upserts them to remote.
+Push: Finds all local records modified since last push (by updated_at), upserts them to remote.
+      No local writes during push — avoids SQLite write lock contention.
 Pull: Finds all remote records newer than last_pull_timestamp, merges locally.
 """
 
@@ -78,6 +79,7 @@ class SyncWorker:
         self._task: Optional[asyncio.Task] = None
         self._remote_db = None
         self._last_pull_at: Optional[datetime] = None
+        self._last_push_at: Optional[datetime] = None
         self._stopping = False
         self.logger = logging.getLogger(__name__)
 
@@ -140,40 +142,12 @@ class SyncWorker:
     def _push_with_connection(self) -> None:
         """Push with a dedicated local DB connection for thread safety.
 
-        Separates remote pushes (long, no local write lock) from local
-        sync_status updates (short write lock per batch) so the main
-        thread can interleave writes between batches.
+        Only reads from local DB (to find modified records and resolve FKs),
+        then writes to remote. No local writes happen during push.
         """
-        # Phase 1: Read local dirty records and push to remote.
-        # Hold a local connection only for the reads + FK resolution.
-        pushed_ids_by_model: dict = {}
-        pushed_delete_ids: list[int] = []
-
         with local_db.connection_context():
-            pushed_ids_by_model = self._push_to_remote()
-            pushed_delete_ids = self._push_deletes_to_remote()
-
-        # Phase 2: Mark pushed records as synced in short per-batch
-        # connections so we don't hold the write lock for long.
-        now = datetime.now(timezone.utc)
-        for local_model, pushed_ids in pushed_ids_by_model.items():
-            for i in range(0, len(pushed_ids), self.PUSH_BATCH_SIZE):
-                batch = pushed_ids[i : i + self.PUSH_BATCH_SIZE]
-                with local_db.connection_context():
-                    local_model.update(
-                        sync_status="synced",
-                        remote_updated_at=now,
-                    ).where(local_model.id.in_(batch)).execute()
-                time.sleep(0.01)
-
-        # Mark pushed deletes as synced
-        for i in range(0, len(pushed_delete_ids), self.PUSH_BATCH_SIZE):
-            batch = pushed_delete_ids[i : i + self.PUSH_BATCH_SIZE]
-            with local_db.connection_context():
-                SyncDelete.update(synced=True).where(
-                    SyncDelete.id.in_(batch)
-                ).execute()
-            time.sleep(0.01)
+            self._push_to_remote()
+            self._push_deletes_to_remote()
 
     def _pull_with_connection(self) -> None:
         """Pull with short per-record local DB connections for thread safety.
@@ -255,27 +229,14 @@ class SyncWorker:
     PUSH_BATCH_SIZE = 50
 
     def push(self) -> None:
-        """Push all dirty local records to remote and mark them synced.
+        """Push all locally-modified records to remote.
 
-        Public API used by tests. In production, _push_with_connection
-        is used instead to separate reads from writes for shorter lock holds.
+        No local writes — uses updated_at timestamps to detect changes.
         """
-        pushed_ids_by_model = self._push_to_remote()
-        now = datetime.now(timezone.utc)
-        for local_model, pushed_ids in pushed_ids_by_model.items():
-            for i in range(0, len(pushed_ids), self.PUSH_BATCH_SIZE):
-                batch = pushed_ids[i : i + self.PUSH_BATCH_SIZE]
-                local_model.update(
-                    sync_status="synced",
-                    remote_updated_at=now,
-                ).where(local_model.id.in_(batch)).execute()
+        self._push_to_remote()
 
     def push_deletes(self) -> None:
-        """Push local delete records to remote and mark them synced.
-
-        Public API used by tests. In production, _push_with_connection
-        is used instead.
-        """
+        """Push local delete records to remote and mark them synced."""
         synced_ids = self._push_deletes_to_remote()
         for i in range(0, len(synced_ids), self.PUSH_BATCH_SIZE):
             batch = synced_ids[i : i + self.PUSH_BATCH_SIZE]
@@ -283,47 +244,43 @@ class SyncWorker:
                 SyncDelete.id.in_(batch)
             ).execute()
 
-    def _push_to_remote(self) -> dict:
-        """Read dirty local records and push to remote. Returns {model: [ids]} of successful pushes.
+    def _push_to_remote(self) -> None:
+        """Read locally-modified records and push to remote.
 
-        Does NOT write to local DB — caller handles sync_status updates.
+        Uses updated_at > _last_push_at to detect changes instead of
+        sync_status, so no local writes are needed during push.
         """
-        pushed_ids_by_model: dict = {}
         for local_model in PUSH_ORDER:
             remote_model = LOCAL_TO_REMOTE[local_model]
-            dirty_records = list(local_model.select().where(
-                local_model.sync_status == "dirty"
-            ))
+            if self._last_push_at:
+                dirty_records = list(local_model.select().where(
+                    local_model.updated_at > self._last_push_at
+                ))
+            else:
+                # First push — push everything
+                dirty_records = list(local_model.select())
 
             if not dirty_records:
                 continue
 
             self.logger.debug(
-                f"Pushing {len(dirty_records)} dirty {local_model.__name__} records"
+                f"Pushing {len(dirty_records)} modified {local_model.__name__} records"
             )
 
-            pushed_ids = []
             for record in dirty_records:
                 if self._stopping:
-                    break
+                    return
                 try:
                     self._push_record(record, local_model, remote_model)
-                    pushed_ids.append(record.id)
                 except Exception as e:
                     self.logger.error(
                         f"Failed to push {local_model.__name__} id={record.id}: {e}"
                     )
 
-            if pushed_ids:
-                pushed_ids_by_model[local_model] = pushed_ids
-
-        return pushed_ids_by_model
+        self._last_push_at = datetime.now()
 
     def _push_record(self, record, local_model, remote_model) -> None:
-        """Push a single local record to the remote database.
-
-        Returns without marking local as synced — the caller batches that.
-        """
+        """Push a single local record to the remote database."""
         data = {}
         for field in local_model._meta.sorted_fields:
             if field.name == "id":
@@ -335,7 +292,6 @@ class SyncWorker:
             else:
                 data[field.name] = getattr(record, field.name)
 
-        data["sync_status"] = "synced"
         data["remote_updated_at"] = datetime.now(timezone.utc)
 
         # Resolve foreign key IDs from local to remote
@@ -559,11 +515,28 @@ class SyncWorker:
             self._insert_local_from_remote(remote_record, local_model, remote_model)
             return
 
-        if local_record.sync_status == "synced":
+        # If local hasn't been modified since last pull/insert, safe to overwrite.
+        # If local was modified after that, merge instead.
+        # Compare as naive datetimes to avoid tz-aware vs naive mismatch.
+        # SQLite may return DateTimeField values as strings, so parse if needed.
+        locally_modified = False
+        if local_record.remote_updated_at is not None and local_record.updated_at is not None:
+            local_ts = local_record.updated_at
+            remote_ts = local_record.remote_updated_at
+            if isinstance(local_ts, str):
+                local_ts = datetime.fromisoformat(local_ts)
+            if isinstance(remote_ts, str):
+                remote_ts = datetime.fromisoformat(remote_ts)
+            # Strip tzinfo for safe comparison
+            local_ts = local_ts.replace(tzinfo=None)
+            remote_ts = remote_ts.replace(tzinfo=None)
+            locally_modified = local_ts > remote_ts
+
+        if not locally_modified:
             self._overwrite_local_from_remote(
                 local_record, remote_record, local_model, remote_model
             )
-        elif local_record.sync_status == "dirty":
+        else:
             self._merge_local_with_remote(
                 local_record, remote_record, local_model, remote_model
             )
@@ -616,7 +589,6 @@ class SyncWorker:
             else:
                 data[field.name] = getattr(remote_record, field.name)
 
-        data["sync_status"] = "synced"
         data["remote_updated_at"] = remote_record.updated_at
 
         # Resolve foreign keys from remote IDs to local IDs
@@ -693,16 +665,12 @@ class SyncWorker:
                 return
 
         with local_db.atomic():
-            # Use update().execute() after create to avoid save() setting dirty
-            new_record = local_model.create(**data)
-            local_model.update(sync_status="synced").where(
-                local_model.id == new_record.id
-            ).execute()
+            local_model.create(**data)
 
     def _overwrite_local_from_remote(
         self, local_record, remote_record, local_model, remote_model
     ) -> None:
-        """Overwrite a clean local record with remote data."""
+        """Overwrite a locally-unmodified record with remote data."""
         update_data = {}
         for field in remote_model._meta.sorted_fields:
             if field.name in ("id", "sync_status", "remote_updated_at"):
@@ -711,7 +679,6 @@ class SyncWorker:
                 continue  # Skip FK resolution — handled by natural keys
             update_data[field.name] = getattr(remote_record, field.name)
 
-        update_data["sync_status"] = "synced"
         update_data["remote_updated_at"] = remote_record.updated_at
         update_data["updated_at"] = remote_record.updated_at
 
