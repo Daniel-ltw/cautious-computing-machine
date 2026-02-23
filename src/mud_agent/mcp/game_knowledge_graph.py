@@ -53,16 +53,16 @@ class GameKnowledgeGraph:
             with db.connection_context():
                 return func(*args, **kwargs)
 
-        max_retries = 3
+        max_retries = 5
         for attempt in range(max_retries):
             try:
                 return await asyncio.to_thread(_with_connection)
             except OperationalError as e:
                 if "locked" in str(e) and attempt < max_retries - 1:
-                    self.logger.warning(
+                    self.logger.debug(
                         f"DB locked in {func.__name__} (attempt {attempt + 1}/{max_retries}), retrying..."
                     )
-                    await asyncio.sleep(0.2 * (attempt + 1))
+                    await asyncio.sleep(0.1 * (2 ** attempt))
                     continue
                 raise
 
@@ -151,35 +151,31 @@ class GameKnowledgeGraph:
             self.logger.error("Failed to add entity: 'entityType' is missing.")
             return None
 
-        try:
-            if entity_type == "Room":
-                # Separate NPC data from room data
-                npcs = set([npc["name"] for npc in entity_data.pop("npcs", [])])
-                npcs.update([npc["name"] for npc in entity_data.pop("manual_npcs", [])])
-                npcs.update([npc["name"] for npc in entity_data.pop("scan_npcs", [])])
-                npc_list = list([{"name": npc} for npc in npcs])
+        if entity_type == "Room":
+            # Separate NPC data from room data
+            npcs = set([npc["name"] for npc in entity_data.pop("npcs", [])])
+            npcs.update([npc["name"] for npc in entity_data.pop("manual_npcs", [])])
+            npcs.update([npc["name"] for npc in entity_data.pop("scan_npcs", [])])
+            npc_list = list([{"name": npc} for npc in npcs])
 
-                # Create or update the room
-                with db.atomic():
-                    room = Room.create_or_update_from_dict(entity_data)
-                    if not room:
-                        self.logger.error(f"Room is None: {entity_data}")
-                        return None
-
-                with db.atomic():
-                    # Create or update associated NPCs
-                    for npc_data in npc_list:
-                        NPC.create_or_update_from_dict(npc_data, current_room=room)
-
-                return room.entity
-            elif entity_type == "NPC":
-                npc = NPC.create_or_update_from_dict(entity_data)
-                return npc.entity if npc else None
-            else:
-                self.logger.warning(f"Unsupported entityType: {entity_type}")
+            # Create or update the room — create_or_update_from_dict
+            # manages its own per-operation db.atomic() blocks internally.
+            room = Room.create_or_update_from_dict(entity_data)
+            if not room:
+                self.logger.error(f"Room is None: {entity_data}")
                 return None
-        except Exception as e:
-            self.logger.error(f"Error adding entity: {e}", exc_info=True)
+
+            # Create or update associated NPCs — each call manages
+            # its own db.atomic() internally.
+            for npc_data in npc_list:
+                NPC.create_or_update_from_dict(npc_data, current_room=room)
+
+            return room.entity
+        elif entity_type == "NPC":
+            npc = NPC.create_or_update_from_dict(entity_data)
+            return npc.entity if npc else None
+        else:
+            self.logger.warning(f"Unsupported entityType: {entity_type}")
             return None
 
     async def add_relation(
@@ -217,6 +213,9 @@ class GameKnowledgeGraph:
                         f"Created new relation: {from_entity.name} -> {to_entity.name} ({relation_type})"
                     )
                 return relation
+        except OperationalError:
+            # Let "database is locked" propagate to _run_db for retry
+            raise
         except Exception as e:
             self.logger.error(f"Error adding relation: {e}", exc_info=True)
             return None
@@ -447,16 +446,16 @@ class GameKnowledgeGraph:
             return
 
         try:
-            # Transaction 1: Look up rooms (short read, may create to_room)
-            with db.atomic():
-                from_room = Room.get_or_none(Room.room_number == from_room_num)
-                if not from_room:
-                    self.logger.warning(f"Room {from_room_num} not found. Cannot record exit.")
-                    return
+            # Read rooms (no write lock needed for lookups)
+            from_room = Room.get_or_none(Room.room_number == from_room_num)
+            if not from_room:
+                self.logger.warning(f"Room {from_room_num} not found. Cannot record exit.")
+                return
 
-                to_room = Room.get_or_none(Room.room_number == to_room_num)
-                if not to_room:
-                    # If the destination room doesn't exist, create it
+            to_room = Room.get_or_none(Room.room_number == to_room_num)
+            if not to_room:
+                # Create destination room if it doesn't exist (short write)
+                with db.atomic():
                     to_room_entity, _ = Entity.get_or_create(
                         name=str(to_room_num), defaults={"entity_type": "Room"}
                     )
@@ -480,40 +479,36 @@ class GameKnowledgeGraph:
             else:
                 dir_key = mapping.get(dir_in, dir_in)
 
-            # Transaction 2: Read exits and find matching one (short read)
+            # Read exits and find matching one (no write lock needed)
             exit_obj = None
-            with db.atomic():
-                for ex in from_room.exits:
-                    stored = (ex.direction or "").strip().lower()
-                    if stored.startswith("say "):
-                        stored_norm = "say"
-                    elif stored.startswith("enter "):
-                        stored_norm = "enter"
-                    elif stored.startswith("board"):
-                        stored_norm = "board"
-                    elif stored.startswith("escape"):
-                        stored_norm = "escape"
-                    else:
-                        stored_norm = mapping.get(stored, stored)
+            for ex in from_room.exits:
+                stored = (ex.direction or "").strip().lower()
+                if stored.startswith("say "):
+                    stored_norm = "say"
+                elif stored.startswith("enter "):
+                    stored_norm = "enter"
+                elif stored.startswith("board"):
+                    stored_norm = "board"
+                elif stored.startswith("escape"):
+                    stored_norm = "escape"
+                else:
+                    stored_norm = mapping.get(stored, stored)
 
-                    # Direct match on stored direction name
-                    if stored == dir_in:
-                         exit_obj = ex
-                         break
+                # Direct match on stored direction name
+                if stored == dir_in:
+                    exit_obj = ex
+                    break
 
-                    # Also match if the normalized directions are identical AND the stored direction
-                    # is NOT a generic verb like 'enter' that might be used for multiple exits.
-                    # e.g. 'n' vs 'north' is fine to match.
-                    # 'enter hut' vs 'enter rubble' -> both norm to 'enter' -> should NOT match.
-                    if stored_norm == dir_key and stored_norm not in ["enter", "board", "escape", "say"]:
-                        exit_obj = ex
-                        break
+                # Also match if the normalized directions are identical AND the stored direction
+                # is NOT a generic verb like 'enter' that might be used for multiple exits.
+                if stored_norm == dir_key and stored_norm not in ["enter", "board", "escape", "say"]:
+                    exit_obj = ex
+                    break
 
-                    # Check if the command contains the stored direction (e.g. "enter portal" matches "portal")
-                    # This handles cases where the exit is named "portal" but the command is "enter portal"
-                    if len(stored) > 2 and dir_in.endswith(stored):
-                         exit_obj = ex
-                         break
+                # Check if the command contains the stored direction (e.g. "enter portal" matches "portal")
+                if len(stored) > 2 and dir_in.endswith(stored):
+                    exit_obj = ex
+                    break
 
             self.logger.debug(
                 f"Recording exit success: {from_room_num} -> {to_room_num} ({direction} -> {dir_key})"
@@ -549,6 +544,9 @@ class GameKnowledgeGraph:
             self.logger.warning(
                 f"Room not found when recording exit success. From: {from_room_num}, To: {to_room_num}"
             )
+        except OperationalError:
+            # Let "database is locked" propagate to _run_db for retry
+            raise
         except Exception as e:
             self.logger.error(f"Error recording exit success: {e}", exc_info=True)
 

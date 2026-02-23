@@ -239,15 +239,16 @@ def test_record_exit_success_distinct_enter_commands(test_db):
     assert details_rubble["move_command"] == "enter rubble"
 
 
-def test_save_sets_sync_status_dirty(test_db):
-    """Saving a synced record should mark it dirty again."""
+def test_save_updates_timestamp(test_db):
+    """Saving a record should update its updated_at timestamp."""
     entity = Entity.create(name="Sync Test", entity_type="Room")
-    Entity.update(sync_status="synced").where(Entity.id == entity.id).execute()
-    entity = Entity.get_by_id(entity.id)
-    assert entity.sync_status == "synced"
+    original_updated_at = entity.updated_at
+
+    import time
+    time.sleep(0.01)  # Ensure timestamp difference
 
     entity.name = "Updated Name"
     entity.save()
     entity = Entity.get_by_id(entity.id)
-    assert entity.sync_status == "dirty"
+    assert entity.updated_at > original_updated_at
 

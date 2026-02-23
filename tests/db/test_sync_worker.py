@@ -69,10 +69,9 @@ def sync_worker(local_test_db, remote_test_db):
 
 
 def test_push_dirty_entities(sync_worker, local_test_db, remote_test_db):
-    """Dirty local entities should be pushed to remote."""
-    # Create a dirty entity locally
+    """Locally-modified entities should be pushed to remote."""
+    # Create an entity locally
     entity = Entity.create(name="100", entity_type="Room")
-    assert entity.sync_status == "dirty"
 
     # Push
     sync_worker.push()
@@ -81,10 +80,6 @@ def test_push_dirty_entities(sync_worker, local_test_db, remote_test_db):
     remote_entity = RemoteEntity.get_or_none(RemoteEntity.name == "100")
     assert remote_entity is not None
     assert remote_entity.entity_type == "Room"
-
-    # Verify local is now synced
-    entity = Entity.get_by_id(entity.id)
-    assert entity.sync_status == "synced"
 
 
 def test_push_dirty_rooms_with_exits(sync_worker, local_test_db, remote_test_db):
@@ -108,15 +103,22 @@ def test_push_dirty_rooms_with_exits(sync_worker, local_test_db, remote_test_db)
     assert remote_exit.to_room_number == 201
 
 
-def test_push_skips_synced_records(sync_worker, local_test_db, remote_test_db):
-    """Already-synced records should not be pushed again."""
+def test_push_skips_already_pushed_records(sync_worker, local_test_db, remote_test_db):
+    """Records already pushed should not be pushed again."""
     entity = Entity.create(name="300", entity_type="Room")
-    Entity.update(sync_status="synced").where(Entity.id == entity.id).execute()
 
+    # First push — should push the entity
     sync_worker.push()
-
     remote_entity = RemoteEntity.get_or_none(RemoteEntity.name == "300")
-    assert remote_entity is None  # Should not have been pushed
+    assert remote_entity is not None
+
+    # Delete from remote to verify it doesn't get re-pushed
+    remote_entity.delete_instance()
+
+    # Second push — entity hasn't changed, should not be pushed again
+    sync_worker.push()
+    remote_entity = RemoteEntity.get_or_none(RemoteEntity.name == "300")
+    assert remote_entity is None  # Should not have been re-pushed  # Should not have been pushed
 
 
 def test_pull_new_rooms_from_remote(sync_worker, local_test_db, remote_test_db):
@@ -136,21 +138,24 @@ def test_pull_new_rooms_from_remote(sync_worker, local_test_db, remote_test_db):
     local_room = Room.get_or_none(Room.room_number == 500)
     assert local_room is not None
     assert local_room.zone == "FriendZone"
-    assert local_room.sync_status == "synced"
 
 
 def test_pull_new_exits_from_remote(sync_worker, local_test_db, remote_test_db):
     """Exits discovered by a friend should be merged locally."""
-    # Set up local room (already exists)
+    # Set up local rooms (already exist)
     local_entity = Entity.create(name="600", entity_type="Room")
     local_room = Room.create(entity=local_entity, room_number=600, zone="Shared")
-    Entity.update(sync_status="synced").where(Entity.id == local_entity.id).execute()
-    Room.update(sync_status="synced").where(Room.id == local_room.id).execute()
 
     local_entity2 = Entity.create(name="601", entity_type="Room")
     local_room2 = Room.create(entity=local_entity2, room_number=601, zone="Shared")
-    Entity.update(sync_status="synced").where(Entity.id == local_entity2.id).execute()
-    Room.update(sync_status="synced").where(Room.id == local_room2.id).execute()
+
+    # Mark them as pulled from remote so they won't be treated as locally modified
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    Room.update(remote_updated_at=now, updated_at=now).where(Room.id == local_room.id).execute()
+    Room.update(remote_updated_at=now, updated_at=now).where(Room.id == local_room2.id).execute()
+    Entity.update(remote_updated_at=now, updated_at=now).where(Entity.id == local_entity.id).execute()
+    Entity.update(remote_updated_at=now, updated_at=now).where(Entity.id == local_entity2.id).execute()
 
     # Friend discovers an exit on remote that we don't have
     remote_entity = RemoteEntity.create(name="600", entity_type="Room", sync_status="synced")
@@ -177,17 +182,19 @@ def test_pull_new_exits_from_remote(sync_worker, local_test_db, remote_test_db):
 
 
 def test_merge_dirty_local_with_remote_update(sync_worker, local_test_db, remote_test_db):
-    """When local is dirty and remote has updates, merge should combine data."""
-    # Local room with dirty status
+    """When local is modified and remote has updates, merge should combine data."""
+    # Local room — set remote_updated_at in the past so it looks locally modified
     local_entity = Entity.create(name="700", entity_type="Room")
     local_room = Room.create(
         entity=local_entity, room_number=700, zone="LocalZone", terrain="city"
     )
-    # It's dirty because save() sets it
+    # Mark as previously synced, then locally modified (updated_at > remote_updated_at)
+    from datetime import timedelta
+    past_time = datetime.now(timezone.utc) - timedelta(hours=2)
+    Room.update(remote_updated_at=past_time).where(Room.id == local_room.id).execute()
 
     # Remote has newer terrain info
     remote_entity = RemoteEntity.create(name="700", entity_type="Room", sync_status="synced")
-    from datetime import timedelta
     future_time = datetime.now(timezone.utc) + timedelta(hours=1)
     RemoteRoom.create(
         entity=remote_entity, room_number=700, zone="LocalZone",
@@ -199,8 +206,6 @@ def test_merge_dirty_local_with_remote_update(sync_worker, local_test_db, remote
     # Local should have merged — remote terrain wins (newer)
     local_room = Room.get(Room.room_number == 700)
     assert local_room.terrain == "forest"
-    # But still dirty because local had changes
-    assert local_room.sync_status == "dirty"
 
 
 def test_delete_instance_logs_to_sync_deletes(local_test_db):

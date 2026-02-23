@@ -49,9 +49,8 @@ class BaseModel(Model):
         database = db
 
     def save(self, *args, **kwargs):
-        """Override save to update the updated_at timestamp and mark as dirty."""
+        """Override save to update the updated_at timestamp."""
         self.updated_at = datetime.now()
-        self.sync_status = "dirty"
         return super().save(*args, **kwargs)
 
     def get_natural_key(self) -> dict | None:
@@ -501,8 +500,9 @@ ALL_MODELS = [Entity, Room, RoomExit, NPC, Observation, Relation, SyncDelete]
 def get_db_stats() -> dict[str, int]:
     """Get statistics about the database."""
     stats = {}
-    for model in ALL_MODELS:
-        stats[model.__name__] = model.select().count()
+    with db.connection_context():
+        for model in ALL_MODELS:
+            stats[model.__name__] = model.select().count()
     return stats
 
 
@@ -527,8 +527,9 @@ def get_database_stats() -> dict[str, int]:
     """Get statistics about the current database."""
     stats: dict[str, int] = {}
     try:
-        for model in ALL_MODELS:
-            stats[model.__name__] = model.select().count()
+        with db.connection_context():
+            for model in ALL_MODELS:
+                stats[model.__name__] = model.select().count()
         return stats
     except Exception as e:
         logger.error(f"Failed to get database stats: {e}", exc_info=True)
