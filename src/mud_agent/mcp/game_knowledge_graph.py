@@ -151,35 +151,31 @@ class GameKnowledgeGraph:
             self.logger.error("Failed to add entity: 'entityType' is missing.")
             return None
 
-        try:
-            if entity_type == "Room":
-                # Separate NPC data from room data
-                npcs = set([npc["name"] for npc in entity_data.pop("npcs", [])])
-                npcs.update([npc["name"] for npc in entity_data.pop("manual_npcs", [])])
-                npcs.update([npc["name"] for npc in entity_data.pop("scan_npcs", [])])
-                npc_list = list([{"name": npc} for npc in npcs])
+        if entity_type == "Room":
+            # Separate NPC data from room data
+            npcs = set([npc["name"] for npc in entity_data.pop("npcs", [])])
+            npcs.update([npc["name"] for npc in entity_data.pop("manual_npcs", [])])
+            npcs.update([npc["name"] for npc in entity_data.pop("scan_npcs", [])])
+            npc_list = list([{"name": npc} for npc in npcs])
 
-                # Create or update the room
-                with db.atomic():
-                    room = Room.create_or_update_from_dict(entity_data)
-                    if not room:
-                        self.logger.error(f"Room is None: {entity_data}")
-                        return None
-
-                with db.atomic():
-                    # Create or update associated NPCs
-                    for npc_data in npc_list:
-                        NPC.create_or_update_from_dict(npc_data, current_room=room)
-
-                return room.entity
-            elif entity_type == "NPC":
-                npc = NPC.create_or_update_from_dict(entity_data)
-                return npc.entity if npc else None
-            else:
-                self.logger.warning(f"Unsupported entityType: {entity_type}")
+            # Create or update the room — create_or_update_from_dict
+            # manages its own per-operation db.atomic() blocks internally.
+            room = Room.create_or_update_from_dict(entity_data)
+            if not room:
+                self.logger.error(f"Room is None: {entity_data}")
                 return None
-        except Exception as e:
-            self.logger.error(f"Error adding entity: {e}", exc_info=True)
+
+            # Create or update associated NPCs — each call manages
+            # its own db.atomic() internally.
+            for npc_data in npc_list:
+                NPC.create_or_update_from_dict(npc_data, current_room=room)
+
+            return room.entity
+        elif entity_type == "NPC":
+            npc = NPC.create_or_update_from_dict(entity_data)
+            return npc.entity if npc else None
+        else:
+            self.logger.warning(f"Unsupported entityType: {entity_type}")
             return None
 
     async def add_relation(
@@ -217,6 +213,9 @@ class GameKnowledgeGraph:
                         f"Created new relation: {from_entity.name} -> {to_entity.name} ({relation_type})"
                     )
                 return relation
+        except OperationalError:
+            # Let "database is locked" propagate to _run_db for retry
+            raise
         except Exception as e:
             self.logger.error(f"Error adding relation: {e}", exc_info=True)
             return None
@@ -545,6 +544,9 @@ class GameKnowledgeGraph:
             self.logger.warning(
                 f"Room not found when recording exit success. From: {from_room_num}, To: {to_room_num}"
             )
+        except OperationalError:
+            # Let "database is locked" propagate to _run_db for retry
+            raise
         except Exception as e:
             self.logger.error(f"Error recording exit success: {e}", exc_info=True)
 
