@@ -53,16 +53,16 @@ class GameKnowledgeGraph:
             with db.connection_context():
                 return func(*args, **kwargs)
 
-        max_retries = 3
+        max_retries = 5
         for attempt in range(max_retries):
             try:
                 return await asyncio.to_thread(_with_connection)
             except OperationalError as e:
                 if "locked" in str(e) and attempt < max_retries - 1:
-                    self.logger.warning(
+                    self.logger.debug(
                         f"DB locked in {func.__name__} (attempt {attempt + 1}/{max_retries}), retrying..."
                     )
-                    await asyncio.sleep(0.2 * (attempt + 1))
+                    await asyncio.sleep(0.1 * (2 ** attempt))
                     continue
                 raise
 
