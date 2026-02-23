@@ -110,12 +110,25 @@ class SyncWorker:
         self.logger.info("SyncWorker stopped.")
 
     async def _sync_loop(self) -> None:
-        """Main sync loop: push then pull on each cycle."""
+        """Main sync loop.
+
+        First cycle: pull first (deletes then updates) so we don't push
+        stale data over newer remote state.
+        Subsequent cycles: push first so local changes propagate quickly,
+        then pull.
+        """
+        first_cycle = True
         try:
             while True:
                 try:
-                    await asyncio.to_thread(self._push_with_connection)
-                    await asyncio.to_thread(self._pull_with_connection)
+                    if first_cycle:
+                        self.logger.info("First sync cycle — pulling remote state first")
+                        await asyncio.to_thread(self._pull_with_connection)
+                        await asyncio.to_thread(self._push_with_connection)
+                        first_cycle = False
+                    else:
+                        await asyncio.to_thread(self._push_with_connection)
+                        await asyncio.to_thread(self._pull_with_connection)
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -133,8 +146,8 @@ class SyncWorker:
     def _pull_with_connection(self) -> None:
         """Pull with a dedicated local DB connection for thread safety."""
         with local_db.connection_context():
-            self.pull()
             self.pull_deletes()
+            self.pull()
 
     # Maximum number of IDs to mark as synced in a single UPDATE statement
     PUSH_BATCH_SIZE = 50
@@ -213,10 +226,13 @@ class SyncWorker:
                 remote_model.create(**data)
 
     def _resolve_fk_for_push(self, record, local_model, data: dict) -> dict:
-        """Resolve local FK IDs to remote FK IDs for push."""
+        """Resolve local FK IDs to remote FK IDs for push.
+
+        Raises DoesNotExist if a required FK target is missing locally
+        (the caller treats this as a push failure for this record).
+        """
         if local_model == Room:
-            # entity FK: find remote entity by natural key
-            local_entity = record.entity
+            local_entity = record.entity  # raises DoesNotExist if orphaned
             remote_entity = RemoteEntity.get_or_none(
                 (RemoteEntity.name == local_entity.name)
                 & (RemoteEntity.entity_type == local_entity.entity_type)
@@ -225,8 +241,14 @@ class SyncWorker:
                 data["entity"] = remote_entity.id
 
         elif local_model == RoomExit:
-            # from_room FK
-            from_room = record.from_room
+            # from_room FK — required; skip record if local Room is gone
+            try:
+                from_room = record.from_room
+            except DoesNotExist:
+                self.logger.warning(
+                    f"Skipping RoomExit id={record.id}: from_room_id={record.from_room_id} missing locally"
+                )
+                raise
             remote_from = RemoteRoom.get_or_none(
                 RemoteRoom.room_number == from_room.room_number
             )
@@ -235,11 +257,14 @@ class SyncWorker:
 
             # to_room FK (nullable)
             if record.to_room_id:
-                to_room = record.to_room
-                remote_to = RemoteRoom.get_or_none(
-                    RemoteRoom.room_number == to_room.room_number
-                )
-                data["to_room"] = remote_to.id if remote_to else None
+                try:
+                    to_room = record.to_room
+                    remote_to = RemoteRoom.get_or_none(
+                        RemoteRoom.room_number == to_room.room_number
+                    )
+                    data["to_room"] = remote_to.id if remote_to else None
+                except DoesNotExist:
+                    data["to_room"] = None
 
         elif local_model == NPC:
             local_entity = record.entity
@@ -249,13 +274,15 @@ class SyncWorker:
             )
             if remote_entity:
                 data["entity"] = remote_entity.id
-            # current_room FK (nullable)
             if record.current_room_id:
-                local_room = record.current_room
-                remote_room = RemoteRoom.get_or_none(
-                    RemoteRoom.room_number == local_room.room_number
-                )
-                data["current_room"] = remote_room.id if remote_room else None
+                try:
+                    local_room = record.current_room
+                    remote_room = RemoteRoom.get_or_none(
+                        RemoteRoom.room_number == local_room.room_number
+                    )
+                    data["current_room"] = remote_room.id if remote_room else None
+                except DoesNotExist:
+                    data["current_room"] = None
 
         elif local_model == Observation:
             local_entity = record.entity
