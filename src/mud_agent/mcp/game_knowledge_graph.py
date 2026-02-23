@@ -42,15 +42,15 @@ class GameKnowledgeGraph:
         self._initialized = False
 
     async def _run_db(self, func, *args, **kwargs):
-        """Run a database function with retry on lock errors.
+        """Run a database function in a thread to avoid blocking the event loop.
 
-        SQLite operations are fast enough to run synchronously. Retries
-        with backoff if the database is locked by the SyncWorker thread.
+        Uses asyncio.to_thread so SQLite operations don't block async tasks.
+        Retries with backoff if the database is locked by the SyncWorker thread.
         """
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                return func(*args, **kwargs)
+                return await asyncio.to_thread(func, *args, **kwargs)
             except OperationalError as e:
                 if "locked" in str(e) and attempt < max_retries - 1:
                     self.logger.warning(
@@ -441,6 +441,7 @@ class GameKnowledgeGraph:
             return
 
         try:
+            # Transaction 1: Look up rooms (short read, may create to_room)
             with db.atomic():
                 from_room = Room.get_or_none(Room.room_number == from_room_num)
                 if not from_room:
@@ -455,28 +456,27 @@ class GameKnowledgeGraph:
                     )
                     to_room = Room.create(entity=to_room_entity, room_number=to_room_num)
 
-                # Normalize the direction to match stored exit keys
-                dir_in = (direction or "").strip().lower()
-                # Handle command-based exits and synonyms
-                mapping = {
-                    "north": "n", "south": "s", "east": "e", "west": "w", "up": "u", "down": "d",
-                    "n": "n", "s": "s", "e": "e", "w": "w", "u": "u", "d": "d",
-                    "enter": "enter", "board": "board", "escape": "escape",
-                }
-                # Reduce phrase commands like 'enter gate' to 'enter'
-                if dir_in.startswith("say "):
-                    dir_key = "say"
-                elif dir_in.startswith("enter "):
-                    dir_key = "enter"
-                elif dir_in.startswith("board"):
-                    dir_key = "board"
-                elif dir_in.startswith("escape"):
-                    dir_key = "escape"
-                else:
-                    dir_key = mapping.get(dir_in, dir_in)
+            # Pure Python: normalize direction (no DB access needed)
+            dir_in = (direction or "").strip().lower()
+            mapping = {
+                "north": "n", "south": "s", "east": "e", "west": "w", "up": "u", "down": "d",
+                "n": "n", "s": "s", "e": "e", "w": "w", "u": "u", "d": "d",
+                "enter": "enter", "board": "board", "escape": "escape",
+            }
+            if dir_in.startswith("say "):
+                dir_key = "say"
+            elif dir_in.startswith("enter "):
+                dir_key = "enter"
+            elif dir_in.startswith("board"):
+                dir_key = "board"
+            elif dir_in.startswith("escape"):
+                dir_key = "escape"
+            else:
+                dir_key = mapping.get(dir_in, dir_in)
 
-                # Find the matching exit robustly, comparing normalized forms
-                exit_obj = None
+            # Transaction 2: Read exits and find matching one (short read)
+            exit_obj = None
+            with db.atomic():
                 for ex in from_room.exits:
                     stored = (ex.direction or "").strip().lower()
                     if stored.startswith("say "):
@@ -506,23 +506,19 @@ class GameKnowledgeGraph:
                     # Check if the command contains the stored direction (e.g. "enter portal" matches "portal")
                     # This handles cases where the exit is named "portal" but the command is "enter portal"
                     if len(stored) > 2 and dir_in.endswith(stored):
-                         # Verify destination matching if we have that info, to prevent bad matches?
-                         # Actually, without unique constraint on (from, to), multiple exits can go to same place.
-                         # If 'enter portal' goes to same room as 'portal' exit, we should match.
-                         # If we don't know destination of stored exit, we assume match based on name.
                          exit_obj = ex
                          break
 
-                self.logger.debug(
-                    f"Recording exit success: {from_room_num} -> {to_room_num} ({direction} -> {dir_key})"
-                    f" with move command '{move_cmd}'"
-                    f" pre-commands: {pre_cmds}"
-                )
+            self.logger.debug(
+                f"Recording exit success: {from_room_num} -> {to_room_num} ({direction} -> {dir_key})"
+                f" with move command '{move_cmd}'"
+                f" pre-commands: {pre_cmds}"
+            )
 
+            # Transaction 3: Create or update exit (short write)
+            with db.atomic():
                 if exit_obj is None:
                     try:
-                        # With the new unique constraint on (from_room, direction), we can trust get_or_create
-                        # to create a new exit if the direction string is different (e.g. "enter rubble" vs "enter hut")
                         exit_obj = self.get_or_create_exit(from_room, dir_in, to_room=to_room, to_room_number=to_room_num)
                     except Exception as e:
                         self.logger.error(f"Failed to record new exit {dir_in} -> {to_room_num}: {e}")
@@ -533,11 +529,12 @@ class GameKnowledgeGraph:
                 exit_obj.to_room_number = to_room_num
                 exit_obj.save()
 
-                # Check if details are already fully populated - skip if so
-                existing_details = exit_obj.get_command_details()
-                if (existing_details.get("move_command") == move_cmd):
-                    self.logger.debug(f"Exit {exit_obj.direction} already has correct details, skipping update.")
-                else:
+            # Transaction 4: Update exit details if changed (short write)
+            existing_details = exit_obj.get_command_details()
+            if (existing_details.get("move_command") == move_cmd):
+                self.logger.debug(f"Exit {exit_obj.direction} already has correct details, skipping update.")
+            else:
+                with db.atomic():
                     exit_obj.record_exit_success(
                         move_command=move_cmd, pre_commands=pre_cmds or [], force=False
                     )

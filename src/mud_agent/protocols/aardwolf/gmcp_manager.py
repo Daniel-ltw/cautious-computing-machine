@@ -63,6 +63,7 @@ class AardwolfGMCPManager:
         )
         self._kg_update_failures = 0
         self._kg_update_task: Any | None = None
+        self._last_kg_room_num: int | None = None
 
         # Agent reference (set by the agent)
         self.agent: Any = None
@@ -265,9 +266,14 @@ class AardwolfGMCPManager:
                     if self.agent and hasattr(self.agent, "knowledge_graph"):
                         room_info = self.get_room_info()
                         if room_info and room_info.get("num") and room_info.get("name"):
+                            room_num = room_info.get("num")
+                            # Skip update if we're still in the same room
+                            if room_num == self._last_kg_room_num:
+                                await _asyncio.sleep(self.kg_update_interval)
+                                continue
                             entity_data = {
                                 "entityType": "Room",
-                                "room_number": room_info.get("num"),
+                                "room_number": room_num,
                                 "name": room_info.get("name"),
                                 "description": room_info.get("desc", ""),
                                 "exits": room_info.get("exits", {}),
@@ -278,6 +284,7 @@ class AardwolfGMCPManager:
                             try:
                                 await self.agent.knowledge_graph.add_entity(entity_data)
                                 self._kg_update_failures = 0
+                                self._last_kg_room_num = room_num
                             except Exception:
                                 self._kg_update_failures += 1
                                 if self._kg_update_failures >= self.max_kg_failures:
