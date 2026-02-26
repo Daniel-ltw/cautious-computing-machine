@@ -140,34 +140,40 @@ async def main() -> int:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-            # 6. Stop buff manager
+            # 6. Stop combat skill manager
+            try:
+                await agent.combat_skill_manager.stop()
+            except Exception as e:
+                logger.error(f"Error stopping combat skill manager: {e}")
+
+            # 7. Stop buff manager
             try:
                 await agent.buff_manager.stop()
             except Exception as e:
                 logger.error(f"Error stopping buff manager: {e}")
 
-            # 7. Stop tick manager BEFORE state manager — tick callbacks
+            # 8. Stop tick manager BEFORE state manager — tick callbacks
             #    invoke state_manager.on_tick, so tick must stop first.
             try:
                 agent.tick_manager.stop()
             except Exception as e:
                 logger.error(f"Error stopping tick manager: {e}")
 
-            # 8. Stop state manager
+            # 9. Stop state manager
             if agent.use_threaded_updates:
                 try:
                     agent.state_manager.stop_threads()
                 except Exception as e:
                     logger.error(f"Error stopping state manager: {e}")
 
-            # 9. Stop the sync worker (cancels _sync_loop task, closes remote DB)
+            # 10. Stop the sync worker (cancels _sync_loop task, closes remote DB)
             if agent.sync_worker:
                 try:
                     await agent.sync_worker.stop()
                 except Exception as e:
                     logger.error(f"Error stopping sync worker: {e}")
 
-            # 10. Close the local SQLite database connection
+            # 11. Close the local SQLite database connection
             try:
                 await agent.knowledge_graph.cleanup()
             except Exception as e:
@@ -227,6 +233,10 @@ async def connect_and_initialize(agent, character_name, password, config):
             f"{config.mud.host}:{config.mud.port}",
             character_name,
         )
+
+        # Start combat skill rotation if configured
+        if agent.combat_skill_manager.enabled:
+            await agent.combat_skill_manager.start()
 
         # Set a flag in the agent to indicate that connection is complete
         agent.connection_complete = True
