@@ -56,6 +56,7 @@ class CombatSkillManager:
         self._rotation_index: int = 0
         self._pending_round_task: asyncio.Task | None = None
         self._was_in_combat: bool = False
+        self.learned_skills: set[str] = set()
 
     @property
     def enabled(self) -> bool:
@@ -231,3 +232,87 @@ class CombatSkillManager:
         self.state = "IDLE"
         self._opener_index = 0
         self._rotation_index = 0
+
+    @staticmethod
+    def _parse_learned_output(text: str) -> set[str]:
+        """Parse the output of the 'learned' command to extract skill names.
+
+        The learned output is a table where each data row has a skill name as
+        the first column, followed by numeric columns (spell number, practice%,
+        level learned). Header/separator lines and summary lines are skipped.
+
+        Returns:
+            A set of lowercase skill names.
+        """
+        skills: set[str] = set()
+        if not text:
+            return skills
+
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # Skip separator lines (dashes, equals, pipes only)
+            if all(c in "-=+| " for c in line):
+                continue
+            # Skip header-like lines and summary lines
+            lower = line.lower()
+            if any(
+                keyword in lower
+                for keyword in [
+                    "skill",
+                    "spell",
+                    "practice",
+                    "level",
+                    "training",
+                    "session",
+                    "total",
+                ]
+            ):
+                continue
+            # Extract the first column — skill name is text before first number
+            # Lines look like: "backstab            123    85%     10"
+            parts = line.split()
+            if not parts:
+                continue
+            # Collect leading non-numeric words as the skill name
+            name_parts = []
+            for part in parts:
+                # Stop at first purely numeric token or percentage
+                stripped = part.rstrip("%")
+                if stripped.isdigit():
+                    break
+                name_parts.append(part)
+            if name_parts:
+                skill_name = " ".join(name_parts).lower()
+                skills.add(skill_name)
+
+        return skills
+
+    async def fetch_and_validate_skills(self) -> None:
+        """Fetch the learned skills list and validate configured combat skills."""
+        try:
+            response = await self.agent.command_processor.process_command(
+                "learned"
+            )
+            self.learned_skills = self._parse_learned_output(response)
+            self.logger.info(
+                "Loaded %d learned skills from server", len(self.learned_skills)
+            )
+
+            # Validate configured combat skills
+            all_configured = (
+                self.agent.config.agent.combat_opener_skills
+                + self.agent.config.agent.combat_rotation_skills
+            )
+            for skill in all_configured:
+                if skill.lower() not in self.learned_skills:
+                    self.logger.warning(
+                        "Combat skill '%s' is not in learned skills list "
+                        "— check spelling",
+                        skill,
+                    )
+        except Exception as e:
+            self.logger.error(
+                "Failed to fetch/validate learned skills: %s", e, exc_info=True
+            )

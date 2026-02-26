@@ -521,3 +521,124 @@ class TestCombatSkillManagerEventHandling:
         mgr._handle_incoming_data("You hit the training dummy.")
         assert mgr._pending_round_task is None
         agent.send_command.assert_not_called()
+
+
+class TestLearnedSkillsParsing:
+    """Test parsing of the 'learned' command output."""
+
+    def test_parse_learned_output_extracts_skill_names(self):
+        """Skill names are extracted from typical learned output."""
+        output = (
+            "------------------------------------------------------------\n"
+            "backstab            123    85%     10\n"
+            "circle              124    90%     15\n"
+            "dirt kick           125    75%     20\n"
+            "kick                126    80%     5\n"
+            "sneak               127    95%     1\n"
+            "------------------------------------------------------------\n"
+        )
+        result = CombatSkillManager._parse_learned_output(output)
+        assert result == {"backstab", "circle", "dirt kick", "kick", "sneak"}
+
+    def test_parse_learned_output_empty_response(self):
+        """Empty or blank input returns empty set."""
+        assert CombatSkillManager._parse_learned_output("") == set()
+        assert CombatSkillManager._parse_learned_output("   \n\n  ") == set()
+
+    def test_parse_learned_output_ignores_header_and_separator_lines(self):
+        """Header lines and separators are not included as skills."""
+        output = (
+            "------------------------------------------------------------\n"
+            "Skill Name          Spell#  Practice  Level Learned\n"
+            "------------------------------------------------------------\n"
+            "backstab            123    85%     10\n"
+            "------------------------------------------------------------\n"
+            "You have 5 training sessions remaining.\n"
+            "Total skills learned: 1\n"
+        )
+        result = CombatSkillManager._parse_learned_output(output)
+        assert result == {"backstab"}
+
+    def test_parse_learned_output_case_insensitive(self):
+        """Skill names are stored lowercase."""
+        output = "Backstab            123    85%     10\n"
+        result = CombatSkillManager._parse_learned_output(output)
+        assert "backstab" in result
+
+
+class TestSkillValidation:
+    """Test validation of configured combat skills against learned skills."""
+
+    @pytest.mark.asyncio
+    async def test_fetch_calls_process_command(self):
+        """fetch_and_validate_skills sends 'learned' command."""
+        agent = make_agent(rotation_skills=["kick"])
+        agent.command_processor = MagicMock()
+        agent.command_processor.process_command = AsyncMock(
+            return_value="kick                126    80%     5\n"
+        )
+        mgr = CombatSkillManager(agent)
+        await mgr.fetch_and_validate_skills()
+        agent.command_processor.process_command.assert_called_once_with("learned")
+
+    @pytest.mark.asyncio
+    async def test_learned_skills_stored(self):
+        """Parsed skills are stored on the manager."""
+        agent = make_agent(rotation_skills=["kick"])
+        agent.command_processor = MagicMock()
+        agent.command_processor.process_command = AsyncMock(
+            return_value="kick                126    80%     5\nbackstab            123    85%     10\n"
+        )
+        mgr = CombatSkillManager(agent)
+        await mgr.fetch_and_validate_skills()
+        assert mgr.learned_skills == {"kick", "backstab"}
+
+    @pytest.mark.asyncio
+    async def test_validate_warns_on_unknown_skill(self, caplog):
+        """Warning logged when a configured skill is not in learned list."""
+        import logging
+
+        agent = make_agent(
+            opener_skills=["backstab"],
+            rotation_skills=["circle", "nonexistent skill"],
+        )
+        agent.command_processor = MagicMock()
+        agent.command_processor.process_command = AsyncMock(
+            return_value="backstab            123    85%     10\ncircle              124    90%     15\n"
+        )
+        mgr = CombatSkillManager(agent)
+        with caplog.at_level(logging.WARNING):
+            await mgr.fetch_and_validate_skills()
+        assert any("nonexistent skill" in record.message for record in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_validate_passes_for_known_skills(self, caplog):
+        """No warning when all configured skills are in learned list."""
+        import logging
+
+        agent = make_agent(
+            opener_skills=["backstab"],
+            rotation_skills=["kick"],
+        )
+        agent.command_processor = MagicMock()
+        agent.command_processor.process_command = AsyncMock(
+            return_value="backstab            123    85%     10\nkick                126    80%     5\n"
+        )
+        mgr = CombatSkillManager(agent)
+        with caplog.at_level(logging.WARNING):
+            await mgr.fetch_and_validate_skills()
+        warning_records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert len(warning_records) == 0
+
+    @pytest.mark.asyncio
+    async def test_fetch_handles_error_gracefully(self):
+        """Errors during fetch don't crash the manager."""
+        agent = make_agent(rotation_skills=["kick"])
+        agent.command_processor = MagicMock()
+        agent.command_processor.process_command = AsyncMock(
+            side_effect=Exception("Connection lost")
+        )
+        mgr = CombatSkillManager(agent)
+        # Should not raise
+        await mgr.fetch_and_validate_skills()
+        assert mgr.learned_skills == set()
