@@ -234,9 +234,14 @@ async def connect_and_initialize(agent, character_name, password, config):
             character_name,
         )
 
-        # Fetch learned skills and validate combat config, then start rotation
+        # Fetch learned skills (available to all managers)
+        await agent.learned_skills_provider.fetch()
+
+        # Validate combat config against learned skills, then start rotation
         if agent.combat_skill_manager.enabled:
-            await agent.combat_skill_manager.fetch_and_validate_skills()
+            agent.combat_skill_manager.validate_skills(
+                agent.learned_skills_provider.skills
+            )
             await agent.combat_skill_manager.start()
 
         # Set a flag in the agent to indicate that connection is complete
