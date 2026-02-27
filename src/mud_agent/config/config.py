@@ -147,10 +147,26 @@ class AgentConfig:
 
     autocast_commands: list[str]
     recall_command: str | None
+    combat_opener_skills: list[str]
+    combat_rotation_skills: list[str]
+    combat_flee_threshold: float
+    combat_flee_command: str
 
-    def __init__(self, autocast_commands: list[str] | None = None, recall_command: str | None = None):
+    def __init__(
+        self,
+        autocast_commands: list[str] | None = None,
+        recall_command: str | None = None,
+        combat_opener_skills: list[str] | None = None,
+        combat_rotation_skills: list[str] | None = None,
+        combat_flee_threshold: float = 0.25,
+        combat_flee_command: str = "flee",
+    ):
         self.autocast_commands = autocast_commands or ["nimble", "hide", "sneak", "cast under"]
         self.recall_command = recall_command
+        self.combat_opener_skills = combat_opener_skills if combat_opener_skills is not None else []
+        self.combat_rotation_skills = combat_rotation_skills if combat_rotation_skills is not None else []
+        self.combat_flee_threshold = combat_flee_threshold
+        self.combat_flee_command = combat_flee_command
 
     @classmethod
     def from_env(cls) -> "AgentConfig":
@@ -167,9 +183,28 @@ class AgentConfig:
             # Split by comma and strip whitespace
             commands = [cmd.strip() for cmd in autocast_env.split(",") if cmd.strip()]
 
+        opener_env = os.getenv("COMBAT_OPENER_SKILLS")
+        opener_skills = (
+            [s.strip() for s in opener_env.split(",") if s.strip()] if opener_env else None
+        )
+
+        rotation_env = os.getenv("COMBAT_ROTATION_SKILLS")
+        rotation_skills = (
+            [s.strip() for s in rotation_env.split(",") if s.strip()] if rotation_env else None
+        )
+
+        flee_threshold_env = os.getenv("COMBAT_FLEE_THRESHOLD")
+        flee_threshold = float(flee_threshold_env) if flee_threshold_env else 0.25
+
+        flee_command = os.getenv("COMBAT_FLEE_COMMAND", "flee")
+
         return cls(
             autocast_commands=commands,
-            recall_command=recall_command
+            recall_command=recall_command,
+            combat_opener_skills=opener_skills,
+            combat_rotation_skills=rotation_skills,
+            combat_flee_threshold=flee_threshold,
+            combat_flee_command=flee_command,
         )
 
     @classmethod
@@ -185,6 +220,10 @@ class AgentConfig:
         return cls(
             autocast_commands=config.get("autocast_commands"),
             recall_command=config.get("recall_command"),
+            combat_opener_skills=config.get("combat_opener_skills"),
+            combat_rotation_skills=config.get("combat_rotation_skills"),
+            combat_flee_threshold=config.get("combat_flee_threshold", 0.25),
+            combat_flee_command=config.get("combat_flee_command", "flee"),
         )
 
 

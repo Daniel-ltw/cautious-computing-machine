@@ -22,6 +22,8 @@ from ..utils.tick_manager import TickManager
 from .automation_manager import AutomationManager
 from .buff_manager import BuffManager
 from .combat_manager import CombatManager
+from .combat_skill_manager import CombatSkillManager
+from .learned_skills import LearnedSkillsProvider
 from .decision_engine import DecisionEngine
 from .npc_manager import NPCManager
 from .quest_manager import QuestManager
@@ -97,6 +99,8 @@ class MUDAgent:
         self.decision_engine = DecisionEngine(self.events, self.client)
         self.quest_manager = QuestManager(self)
         self.buff_manager = BuffManager(self)
+        self.combat_skill_manager = CombatSkillManager(self)
+        self.learned_skills_provider = LearnedSkillsProvider(self)
 
         # For backward compatibility, alias state_manager as status_manager
         self.status_manager = self.state_manager
@@ -133,6 +137,7 @@ class MUDAgent:
         await self.room_manager.setup()
         await self.quest_manager.setup()
         await self.buff_manager.setup()
+        await self.combat_skill_manager.setup()
         self._managers_setup = True
         self.logger.info("Agent managers setup complete")
 

@@ -47,6 +47,54 @@ class TestAgentConfig:
 
         assert config.autocast_commands == ["custom1", "custom2"]
 
+    def test_combat_defaults(self):
+        """Test that combat config defaults are set correctly."""
+        config = AgentConfig()
+        assert config.combat_opener_skills == []
+        assert config.combat_rotation_skills == []
+        assert config.combat_flee_threshold == 0.25
+        assert config.combat_flee_command == "flee"
+
+    def test_combat_from_env(self):
+        """Test creating combat config from environment variables."""
+        with patch.dict(
+            os.environ,
+            {
+                "COMBAT_OPENER_SKILLS": "backstab",
+                "COMBAT_ROTATION_SKILLS": "circle,dirt kick,kick",
+                "COMBAT_FLEE_THRESHOLD": "0.3",
+                "COMBAT_FLEE_COMMAND": "recall",
+            },
+        ):
+            config = AgentConfig.from_env()
+            assert config.combat_opener_skills == ["backstab"]
+            assert config.combat_rotation_skills == ["circle", "dirt kick", "kick"]
+            assert config.combat_flee_threshold == 0.3
+            assert config.combat_flee_command == "recall"
+
+    def test_combat_from_env_empty(self):
+        """Test that missing combat env vars use defaults."""
+        with patch.dict(os.environ, {}, clear=True):
+            config = AgentConfig.from_env()
+            assert config.combat_opener_skills == []
+            assert config.combat_rotation_skills == []
+            assert config.combat_flee_threshold == 0.25
+            assert config.combat_flee_command == "flee"
+
+    def test_combat_from_dict(self):
+        """Test creating combat config from a dictionary."""
+        config_dict = {
+            "combat_opener_skills": ["backstab"],
+            "combat_rotation_skills": ["circle", "kick"],
+            "combat_flee_threshold": 0.5,
+            "combat_flee_command": "recall",
+        }
+        config = AgentConfig.from_dict(config_dict)
+        assert config.combat_opener_skills == ["backstab"]
+        assert config.combat_rotation_skills == ["circle", "kick"]
+        assert config.combat_flee_threshold == 0.5
+        assert config.combat_flee_command == "recall"
+
 
 class TestConfigWithAgent:
     """Tests for the Config class including AgentConfig."""
