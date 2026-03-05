@@ -99,3 +99,54 @@ async def test_record_exit_success_matches_portal(knowledge_graph, test_database
     updated_exit = exits[0]
     details = updated_exit.get_command_details()
     assert details["move_command"] == "enter portal"
+
+
+@pytest.mark.asyncio
+async def test_find_path_with_zone_filter(knowledge_graph, test_database):
+    """Zone filter constrains room lookup by name to rooms in the specified zone."""
+
+    # Create Room 100 in ZoneA
+    r1_entity = Entity.create(name="100", entity_type="Room")
+    r1 = Room.create(entity=r1_entity, room_number=100, zone="ZoneA", full_name="Market Square")
+
+    # Create Room 200 in ZoneB with the SAME room name
+    r2_entity = Entity.create(name="200", entity_type="Room")
+    r2 = Room.create(entity=r2_entity, room_number=200, zone="ZoneB", full_name="Market Square")
+
+    # Create Room 101 in ZoneA connected to Room 100
+    r3_entity = Entity.create(name="101", entity_type="Room")
+    r3 = Room.create(entity=r3_entity, room_number=101, zone="ZoneA")
+    RoomExit.create(from_room=r3, to_room=r1, to_room_number=100, direction="n")
+
+    # Without zone filter — could match either room (nondeterministic)
+    # With zone filter "ZoneA" — must match room 100
+    result = await knowledge_graph.find_path_between_rooms(
+        start_room_id=101, end_room_identifier="Market Square", zone="ZoneA"
+    )
+    assert result is not None
+    assert result["path"] == ["n"]
+
+    # With zone filter "ZoneB" — must match room 200 (no path from 101)
+    result_b = await knowledge_graph.find_path_between_rooms(
+        start_room_id=101, end_room_identifier="Market Square", zone="ZoneB"
+    )
+    assert result_b is None  # No path from 101 to 200
+
+
+@pytest.mark.asyncio
+async def test_find_path_without_zone_filter(knowledge_graph, test_database):
+    """Without zone filter, room lookup by name finds any matching room."""
+
+    r1_entity = Entity.create(name="300", entity_type="Room")
+    r1 = Room.create(entity=r1_entity, room_number=300, zone="SomeZone", full_name="Tavern")
+
+    r2_entity = Entity.create(name="301", entity_type="Room")
+    r2 = Room.create(entity=r2_entity, room_number=301, zone="SomeZone")
+    RoomExit.create(from_room=r2, to_room=r1, to_room_number=300, direction="e")
+
+    # No zone filter — should still find the room
+    result = await knowledge_graph.find_path_between_rooms(
+        start_room_id=301, end_room_identifier="Tavern"
+    )
+    assert result is not None
+    assert result["path"] == ["e"]

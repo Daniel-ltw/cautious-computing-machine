@@ -249,7 +249,7 @@ class CommandProcessor:
                 match = re.search(r"^(.*?)\s{2,}([A-Z].*)$", response_line)
                 if not match:
                     # Fallback to the original less specific regex if the above fails
-                    match = re.search(r"^(.*)\s{2,}(.+)$", response_line)
+                    match = re.search(r"^(.*?)\s{2,}(.+)$", response_line)
 
                 if match:
                     mob_desc = match.group(1).strip()
@@ -270,7 +270,9 @@ class CommandProcessor:
 
             if room_name:
                 command_log.write(f"[bold green]Room found: {room_name}[/bold green]")
-                await self.find_direction_and_walk_to_room(room_name)
+                # Constrain search to current zone/area
+                current_zone = self.state_manager.area_name or None
+                await self.find_direction_and_walk_to_room(room_name, zone=current_zone)
             else:
                 command_log.write(f"[bold red]No room found for mob: {mob}[/bold red]")
         except Exception as e:
@@ -349,11 +351,12 @@ class CommandProcessor:
         return ";".join(final_commands)
 
 
-    async def find_direction_and_walk_to_room(self, room_name: str) -> None:
+    async def find_direction_and_walk_to_room(self, room_name: str, zone: str | None = None) -> None:
         """Find a path to the specified room using the knowledge graph and pre-fill the run command.
 
         Args:
             room_name: The name of the room to find.
+            zone: Optional zone to constrain the room search to.
         """
         command_log = self.app.query_one("#command-log", CommandLog)
         command_log.write(f"[bold cyan]Finding path to room: {room_name}[/bold cyan]")
@@ -371,6 +374,7 @@ class CommandProcessor:
                 start_room_id=current_room_num,
                 end_room_identifier=room_name,
                 max_depth=1000,
+                zone=zone,
             )
 
             if path_info and path_info.get("path"):

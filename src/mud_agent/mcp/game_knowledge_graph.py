@@ -695,12 +695,12 @@ class GameKnowledgeGraph:
             return None
 
     async def find_path_between_rooms(
-        self, start_room_id: int, end_room_identifier: int | str, max_depth: int = 1000
+        self, start_room_id: int, end_room_identifier: int | str, max_depth: int = 1000, zone: str | None = None
     ) -> dict[str, Any] | None:
-        return await self._run_db(self._find_path_between_rooms_sync, start_room_id, end_room_identifier, max_depth)
+        return await self._run_db(self._find_path_between_rooms_sync, start_room_id, end_room_identifier, max_depth, zone)
 
     def _find_path_between_rooms_sync(
-        self, start_room_id: int, end_room_identifier: int | str, max_depth: int = 1000
+        self, start_room_id: int, end_room_identifier: int | str, max_depth: int = 1000, zone: str | None = None
     ) -> dict[str, Any] | None:
         if not self._initialized:
              self.logger.error("Cannot find path: Knowledge graph not initialized.")
@@ -713,7 +713,11 @@ class GameKnowledgeGraph:
                 try:
                     end_room_id = int(end_room_identifier)
                 except (ValueError, TypeError):
-                    room = Room.get(fn.LOWER(Room.full_name).contains(str(end_room_identifier).lower()))
+                    # Look up room by name, optionally constrained to a zone
+                    query = Room.select().where(fn.LOWER(Room.full_name).contains(str(end_room_identifier).lower()))
+                    if zone:
+                        query = query.where(Room.zone == zone)
+                    room = query.get()
                     end_room_id = room.room_number
 
             path = find_path_between_rooms(from_room=start_room_id, to_room_number=end_room_id, max_depth=max_depth)
