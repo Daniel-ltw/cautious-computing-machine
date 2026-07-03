@@ -114,7 +114,8 @@ class CommandProcessor:
                 if not room_name:
                     command_log.write("[bold red]Usage: /rf <room_name>[/bold red]")
                     return
-                await self.find_direction_and_walk_to_room(room_name)
+                current_zone = self.state_manager.area_name or None
+                await self.find_direction_and_walk_to_room(room_name, zone=current_zone)
 
             elif command.startswith("/atk "):
                 mob = command[4:].strip()

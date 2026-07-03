@@ -170,6 +170,21 @@ class CombatSkillManager:
         except asyncio.CancelledError:
             pass  # Task was cancelled during stop()
 
+    async def _send_skill(self, skill: str) -> None:
+        """Send a combat skill directly to the MUD server.
+
+        Bypasses the command processor (which collects responses, retries,
+        and calls is_in_combat on the response). Using the command processor
+        would block _on_combat_round during response collection; meanwhile
+        incoming data events would call is_in_combat on non-combat text,
+        flip in_combat to False, trigger _on_combat_ended, and reset the
+        rotation indices back to 0 — causing only the opener to ever fire.
+        """
+        if hasattr(self.agent, "client") and self.agent.client.connected:
+            await self.agent.client.send_command(skill)
+        else:
+            self.logger.warning("Cannot send skill '%s': client not connected", skill)
+
     async def _on_combat_round(self) -> None:
         """Handle a combat round. Main state machine logic.
 
@@ -197,7 +212,7 @@ class CombatSkillManager:
             self.logger.warning(
                 f"HP critical ({hp_current}/{hp_max}), fleeing with '{flee_command}'"
             )
-            await self.agent.send_command(flee_command)
+            await self._send_skill(flee_command)
             return
 
         openers = self.agent.config.agent.combat_opener_skills
@@ -212,7 +227,7 @@ class CombatSkillManager:
                 skill = openers[self._opener_index]
                 self._opener_index += 1
                 self.logger.debug(f"Opening skill: {skill}")
-                await self.agent.send_command(skill)
+                await self._send_skill(skill)
                 # Check if all openers are done
                 if self._opener_index >= len(openers):
                     self.state = "ROTATING"
@@ -228,7 +243,7 @@ class CombatSkillManager:
             skill = rotation[self._rotation_index % len(rotation)]
             self._rotation_index += 1
             self.logger.debug(f"Rotation skill: {skill}")
-            await self.agent.send_command(skill)
+            await self._send_skill(skill)
 
     def _on_combat_ended(self) -> None:
         """Handle combat ending. Resets state machine."""

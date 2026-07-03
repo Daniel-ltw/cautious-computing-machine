@@ -22,6 +22,8 @@ def make_agent(
     agent = MagicMock()
     agent.send_command = AsyncMock()
     agent.client = MagicMock()
+    agent.client.connected = True
+    agent.client.send_command = AsyncMock()
     agent.client.events = MagicMock()
     agent.combat_manager = MagicMock()
     agent.combat_manager.in_combat = in_combat
@@ -210,19 +212,19 @@ class TestCombatSkillManagerStateTransitions:
         # First round: IDLE -> OPENING, sends first opener
         await mgr._on_combat_round()
         assert mgr.state == "OPENING"
-        agent.send_command.assert_called_with("backstab")
+        agent.client.send_command.assert_called_with("backstab")
 
         # Second round: still OPENING, sends second opener
-        agent.send_command.reset_mock()
+        agent.client.send_command.reset_mock()
         await mgr._on_combat_round()
         assert mgr.state == "ROTATING"
-        agent.send_command.assert_called_with("circle")
+        agent.client.send_command.assert_called_with("circle")
 
         # Third round: ROTATING, sends rotation skill
-        agent.send_command.reset_mock()
+        agent.client.send_command.reset_mock()
         await mgr._on_combat_round()
         assert mgr.state == "ROTATING"
-        agent.send_command.assert_called_with("kick")
+        agent.client.send_command.assert_called_with("kick")
 
     @pytest.mark.asyncio
     async def test_idle_to_rotating_no_openers(self):
@@ -233,7 +235,7 @@ class TestCombatSkillManagerStateTransitions:
 
         await mgr._on_combat_round()
         assert mgr.state == "ROTATING"
-        agent.send_command.assert_called_with("kick")
+        agent.client.send_command.assert_called_with("kick")
 
     @pytest.mark.asyncio
     async def test_rotation_cycling(self):
@@ -245,17 +247,17 @@ class TestCombatSkillManagerStateTransitions:
         # Round 1: kick
         await mgr._on_combat_round()
         assert mgr.state == "ROTATING"
-        agent.send_command.assert_called_with("kick")
+        agent.client.send_command.assert_called_with("kick")
 
         # Round 2: bash
-        agent.send_command.reset_mock()
+        agent.client.send_command.reset_mock()
         await mgr._on_combat_round()
-        agent.send_command.assert_called_with("bash")
+        agent.client.send_command.assert_called_with("bash")
 
         # Round 3: back to kick
-        agent.send_command.reset_mock()
+        agent.client.send_command.reset_mock()
         await mgr._on_combat_round()
-        agent.send_command.assert_called_with("kick")
+        agent.client.send_command.assert_called_with("kick")
 
     @pytest.mark.asyncio
     async def test_combat_end_resets_state(self):
@@ -285,7 +287,7 @@ class TestCombatSkillManagerStateTransitions:
         mgr = CombatSkillManager(agent)
         # Not started, so active is False
         await mgr._on_combat_round()
-        agent.send_command.assert_not_called()
+        agent.client.send_command.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_not_in_combat_skips_round(self):
@@ -294,7 +296,7 @@ class TestCombatSkillManagerStateTransitions:
         mgr = CombatSkillManager(agent)
         await mgr.start()
         await mgr._on_combat_round()
-        agent.send_command.assert_not_called()
+        agent.client.send_command.assert_not_called()
 
 
 class TestCombatSkillManagerFleeThreshold:
@@ -316,7 +318,7 @@ class TestCombatSkillManagerFleeThreshold:
 
         await mgr._on_combat_round()
         assert mgr.state == "FLEEING"
-        agent.send_command.assert_called_with("flee")
+        agent.client.send_command.assert_called_with("flee")
 
     @pytest.mark.asyncio
     async def test_no_flee_when_hp_high(self):
@@ -333,7 +335,7 @@ class TestCombatSkillManagerFleeThreshold:
 
         await mgr._on_combat_round()
         assert mgr.state != "FLEEING"
-        agent.send_command.assert_called_with("kick")
+        agent.client.send_command.assert_called_with("kick")
 
     @pytest.mark.asyncio
     async def test_fleeing_blocks_further_skills(self):
@@ -352,12 +354,12 @@ class TestCombatSkillManagerFleeThreshold:
         # First round triggers flee
         await mgr._on_combat_round()
         assert mgr.state == "FLEEING"
-        agent.send_command.assert_called_with("flee")
+        agent.client.send_command.assert_called_with("flee")
 
         # Second round: should not send any more commands (state is FLEEING)
-        agent.send_command.reset_mock()
+        agent.client.send_command.reset_mock()
         await mgr._on_combat_round()
-        agent.send_command.assert_not_called()
+        agent.client.send_command.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_zero_max_hp_does_not_crash(self):
@@ -390,7 +392,7 @@ class TestCombatSkillManagerFleeThreshold:
         await mgr.start()
 
         await mgr._on_combat_round()
-        agent.send_command.assert_called_with("recall")
+        agent.client.send_command.assert_called_with("recall")
 
     @pytest.mark.asyncio
     async def test_flee_at_exact_threshold(self):
@@ -431,7 +433,7 @@ class TestCombatSkillManagerDebounce:
         await task
 
         # Only one skill should have been sent
-        agent.send_command.assert_called_once_with("kick")
+        agent.client.send_command.assert_called_once_with("kick")
 
     @pytest.mark.asyncio
     async def test_second_round_after_debounce(self):
@@ -448,9 +450,9 @@ class TestCombatSkillManagerDebounce:
         mgr._schedule_round()
         await mgr._pending_round_task
 
-        assert agent.send_command.call_count == 2
-        agent.send_command.assert_any_call("kick")
-        agent.send_command.assert_any_call("bash")
+        assert agent.client.send_command.call_count == 2
+        agent.client.send_command.assert_any_call("kick")
+        agent.client.send_command.assert_any_call("bash")
 
 
 class TestCombatSkillManagerEventHandling:
@@ -466,7 +468,7 @@ class TestCombatSkillManagerEventHandling:
         mgr._handle_incoming_data("You hit the goblin with your sword.")
         assert mgr._pending_round_task is not None
         await mgr._pending_round_task
-        agent.send_command.assert_called_with("kick")
+        agent.client.send_command.assert_called_with("kick")
 
     @pytest.mark.asyncio
     async def test_inactive_ignores_data(self):
@@ -476,7 +478,7 @@ class TestCombatSkillManagerEventHandling:
         # Not started
         mgr._handle_incoming_data("You hit the goblin with your sword.")
         assert mgr._pending_round_task is None
-        agent.send_command.assert_not_called()
+        agent.client.send_command.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_combat_end_detected_via_data(self):
@@ -509,7 +511,7 @@ class TestCombatSkillManagerEventHandling:
 
         mgr._handle_incoming_data("A bird sings in the distance.")
         assert mgr._pending_round_task is None
-        agent.send_command.assert_not_called()
+        agent.client.send_command.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_combat_text_out_of_combat_ignored(self):
@@ -520,7 +522,7 @@ class TestCombatSkillManagerEventHandling:
 
         mgr._handle_incoming_data("You hit the training dummy.")
         assert mgr._pending_round_task is None
-        agent.send_command.assert_not_called()
+        agent.client.send_command.assert_not_called()
 
 
 class TestSkillValidation:
